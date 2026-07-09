@@ -1,197 +1,113 @@
-# Production Deployment Guide — Neokik Digital SaaS v1.0
+# Production Deployment Guide — Neokik Digital SaaS (Docker Compose)
+
+This guide outlines the steps required to deploy the Neokik Digital SaaS platform in production on an Ubuntu VPS using **Docker Compose** and **Caddy** (with no Nginx or PM2 dependencies).
+
+---
 
 ## Prerequisites
 
-| Component       | Minimum Version | Purpose                       |
-|-----------------|-----------------|-------------------------------|
-| Ubuntu/Debian   | 22.04 LTS       | Operating system              |
-| Node.js         | 18.x LTS        | Backend runtime               |
-| PostgreSQL      | 14+             | Application database          |
-| Docker + Compose| 24.x            | Container orchestration       |
-| Caddy           | 2.x             | Reverse proxy + auto SSL      |
-| p7zip-full      | latest          | Multithread backup extraction |
-| PM2             | 5.x             | Node.js process manager       |
+Ensure the following packages are installed on your VPS:
 
----
+| Component | Minimum Version | Purpose |
+|---|---|---|
+| Ubuntu Server | 22.04 LTS | Host Operating System |
+| Docker | 24.x | Container Runtime |
+| Docker Compose | v2.x | Multi-container Orchestration |
 
-## 1. System Setup
+### 1. Install Docker & Compose on Ubuntu
 
+If Docker is not yet installed on your VPS:
 ```bash
-# Update system
 sudo apt update && sudo apt upgrade -y
-
-# Install Node.js 18 LTS
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt install -y nodejs
-
-# Install PostgreSQL
-sudo apt install -y postgresql postgresql-contrib
-
-# Install Docker
 curl -fsSL https://get.docker.com | bash
 sudo usermod -aG docker $USER
-
-# Install Caddy
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update && sudo apt install caddy
-
-# Install utilities
-sudo apt install -y p7zip-full unzip git
-npm install -g pm2
 ```
 
 ---
 
-## 2. PostgreSQL Database
+## 2. Directory Layout & Setup
 
+Clone or upload the repository to your VPS, for example at `/opt/neokikdigital_saas`:
 ```bash
-# Create database and user
-sudo -u postgres psql <<EOF
-CREATE USER neokik_admin WITH PASSWORD 'YOUR_STRONG_PASSWORD_HERE';
-CREATE DATABASE neokik_saas OWNER neokik_admin;
-GRANT ALL PRIVILEGES ON DATABASE neokik_saas TO neokik_admin;
-EOF
-
-# Initialize schema
-cd /opt/neokik/backend
-node scripts/initDb.js
+sudo mkdir -p /opt/neokikdigital_saas
+sudo chown -R $USER:$USER /opt/neokikdigital_saas
+cd /opt/neokikdigital_saas
 ```
 
 ---
 
-## 3. Application Deployment
+## 3. Environment Variables Configuration
 
-```bash
-# Clone or upload the project
-sudo mkdir -p /opt/neokik
-cd /opt/neokik
+1. Create a `.env` file in the root directory (matching the `.env.example` structure):
+   ```bash
+   cp .env.example .env
+   ```
+2. Open `.env` and configure the following variables:
+   ```env
+   # Database (auto-configured in PostgreSQL container)
+   DB_USER=neokik_admin
+   DB_PASSWORD=generate_a_secure_password_here
+   DB_NAME=neokik_saas
 
-# Install dependencies
-cd backend && npm install --production && npx tsc
-cd ../frontend && npm install && npx vite build
-
-# Create upload directories
-mkdir -p /opt/neokik/backend/uploads/migrations
-chmod 755 /opt/neokik/backend/uploads
-```
-
----
-
-## 4. Environment Variables
-
-Create `/opt/neokik/backend/.env`:
-
-```env
-NODE_ENV=production
-PORT=5000
-
-# Security
-JWT_SECRET=generate-a-64-char-random-string-here
-JWT_EXPIRES_IN=7d
-
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=neokik_admin
-DB_PASSWORD=YOUR_STRONG_PASSWORD_HERE
-DB_NAME=neokik_saas
-
-# Platform
-PLATFORM_DOMAIN=yourdomain.cl
-
-# Mailcow
-MAILCOW_API_URL=https://mail.yourdomain.cl
-MAILCOW_API_KEY=your-mailcow-api-key
-
-# Infrastructure
-CADDY_DRY_RUN=false
-UPLOADS_DIR=/opt/neokik/backend/uploads/migrations
-MAX_UPLOAD_SIZE=17179869184
-VPS_IP=YOUR_VPS_IP
-BASE_DOC_ROOT=/var/www/neokik
-```
-
-> [!CAUTION]
-> Never commit the `.env` file to version control. Generate `JWT_SECRET` with: `openssl rand -hex 32`
+   # Security
+   # Generate a unique secret with: openssl rand -hex 32
+   JWT_SECRET=your_unique_secure_jwt_secret
+   ```
 
 ---
 
-## 5. PM2 Process Management
+## 4. Deploying Containers
 
+Build and start the application stack in detached mode:
 ```bash
-# Start backend
-cd /opt/neokik/backend
-pm2 start dist/server.js --name neokik-api --max-memory-restart 512M
-
-# Save PM2 config and enable startup
-pm2 save
-pm2 startup
+docker compose up --build -d
 ```
 
-### Log Rotation
-
-```bash
-pm2 install pm2-logrotate
-pm2 set pm2-logrotate:max_size 10M
-pm2 set pm2-logrotate:retain 7
-pm2 set pm2-logrotate:compress true
-```
+This command will:
+1. Initialize the PostgreSQL database container (`neokik-db`).
+2. Build and launch the Node.js/TypeScript backend API container (`neokik-api`), waiting until PostgreSQL is fully healthy.
+3. Build and launch the Caddy-based React frontend container (`neokik-frontend`).
+4. Launch the Caddy proxy gateway container (`neokik-caddy`) exposing ports `80` and `443` to the internet.
 
 ---
 
-## 6. Caddy Reverse Proxy
+## 5. Database Initialization
 
-Add to `/etc/caddy/Caddyfile`:
-
-```
-yourdomain.cl {
-    root * /opt/neokik/frontend/dist
-    encode gzip
-    try_files {path} /index.html
-    file_server
-}
-
-api.yourdomain.cl {
-    reverse_proxy localhost:5000
-}
-```
-
+Once the containers are running, initialize the database schema and seed config inside the running backend container:
 ```bash
-sudo systemctl reload caddy
+docker compose exec backend npm run db:init
 ```
+
+> [!IMPORTANT]
+> The database initialization script (`npm run db:init`) will dynamically generate and display a secure random password for the initial administrator user (`admin@neokikdigital.com`). **Save this password securely.**
 
 ---
 
-## 7. Firewall
+## 6. Service Verification & Logs
 
+### Check Container Status
+Verify that all 4 containers are running and healthy:
 ```bash
-sudo ufw allow 22/tcp    # SSH
-sudo ufw allow 80/tcp    # HTTP
-sudo ufw allow 443/tcp   # HTTPS
-sudo ufw enable
+docker compose ps
 ```
 
----
-
-## 8. Run QA Verification
-
+### Inspect Logs
+To inspect logs in real time:
 ```bash
-cd /opt/neokik/backend
-QA_ALLOW_PRODUCTION=true npm run test:qa
+# View all logs
+docker compose logs -f
+
+# View backend logs only
+docker compose logs -f backend
+
+# View proxy gateway logs only
+docker compose logs -f caddy
 ```
 
-All 20 checks should pass before going live.
-
----
-
-## 9. Health Check
-
-After deployment, verify:
-
+### Test API Health
+Execute a curl check to verify that the public health check endpoint is reachable via Caddy proxy:
 ```bash
-curl https://api.yourdomain.cl/api/health
+curl http://localhost/api/health
 ```
 
 Expected response:
@@ -200,3 +116,29 @@ Expected response:
   "status": "healthy"
 }
 ```
+
+---
+
+## 7. Configuring Domain & SSL (Let's Encrypt)
+
+By default, Caddy is configured to serve requests on the VPS public IP (`:80`). To bind a domain (e.g. `jacvroyz.cl`) and enable automatic SSL certificates:
+
+1. Edit the Caddyfile config file at `infra/caddy/Caddyfile`:
+   ```caddy
+   # Comment out the IP block
+   # :80 {
+   #     reverse_proxy /api/* backend:5000
+   #     reverse_proxy frontend:80
+   # }
+
+   # Un-comment and set your production domain name
+   jacvroyz.cl {
+       reverse_proxy /api/* backend:5000
+       reverse_proxy frontend:80
+   }
+   ```
+2. Reload the Caddy service configuration:
+   ```bash
+   docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+   ```
+   Caddy will automatically contact Let's Encrypt, issue, and manage SSL certificates for your domain name.

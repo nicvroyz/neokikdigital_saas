@@ -1,0 +1,10 @@
+:80 {
+    # Set the directory where the React SPA build files are located
+    root * /usr/share/caddy
+
+    # Enable standard static file serving
+    file_server
+
+    # Fallback to index.html for React Router SPA paths
+    try_files {path} /index.html
+}

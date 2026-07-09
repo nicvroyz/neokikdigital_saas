@@ -1,0 +1,16 @@
+# Configuración inicial para la IP pública del VPS (sin SSL automático)
+:80 {
+    # Redirigir peticiones API al contenedor del backend
+    reverse_proxy /api/* backend:5000
+
+    # Redirigir el resto del tráfico al servidor Caddy del frontend
+    reverse_proxy frontend:80
+}
+
+# Configuración preparada para producción con dominio real (SSL automático de Let's Encrypt)
+# Para activarlo, comenta el bloque superior (:80) y descomenta este bloque reemplazando tu dominio:
+#
+# jacvroyz.cl {
+#     reverse_proxy /api/* backend:5000
+#     reverse_proxy frontend:80
+# }

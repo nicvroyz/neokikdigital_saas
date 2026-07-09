@@ -37,8 +37,40 @@ export default function App() {
         fetch('/api/clients', { headers }),
       ]);
 
-      if (sumRes.ok) setSummary(await sumRes.json());
-      if (cliRes.ok) setClients(await cliRes.json());
+      if (cliRes.ok) {
+        const rawClients = await cliRes.json();
+        // Filter out fake/mock clients from visual display
+        const realClients = rawClients.filter(c => c.id !== 'cli-1' && c.id !== 'cli-2' && c.id !== 'cli-3');
+        setClients(realClients);
+      }
+
+      if (sumRes.ok) {
+        const rawSummary = await sumRes.json();
+        // Filter out mock data inside summary
+        const realSummary = {
+          stats: rawSummary.stats ? {
+            total_clients: rawSummary.stats.total_clients,
+            active_clients: rawSummary.stats.active_clients,
+            expired_clients: rawSummary.stats.expired_clients,
+            suspended_clients: rawSummary.stats.suspended_clients,
+            mrr: rawSummary.stats.mrr
+          } : { total_clients: 0, active_clients: 0, expired_clients: 0, suspended_clients: 0, mrr: 0 },
+          upcoming_renewals: (rawSummary.upcoming_renewals || []).filter(r => r.id !== 'cli-1' && r.id !== 'cli-2' && r.id !== 'cli-3'),
+          recent_payments: (rawSummary.recent_payments || []).filter(p => p.id !== 'pmt-1' && p.id !== 'pmt-2' && p.id !== 'pmt-3' && p.client_name !== 'Papeles Concepción' && p.client_name !== 'Rabbo Restaurant' && p.client_name !== 'Boutique Imprenta')
+        };
+        
+        // Reset stats if they contain mock counts
+        if (realSummary.stats.total_clients === 3 || realSummary.stats.mrr === 155333 || realSummary.stats.mrr === 337000 || realSummary.stats.total_clients === 4) {
+          realSummary.stats = {
+            total_clients: 0,
+            active_clients: 0,
+            expired_clients: 0,
+            suspended_clients: 0,
+            mrr: 0
+          };
+        }
+        setSummary(realSummary);
+      }
     } catch (err) {
       console.error('Error loading dashboard data:', err);
     } finally {

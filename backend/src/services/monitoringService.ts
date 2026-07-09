@@ -3,6 +3,7 @@ import { eventBus } from './eventBus';
 import { execSync } from 'child_process';
 import { config } from '../config/env';
 import { randomUUID } from 'crypto';
+import fs from 'fs';
 
 function isDryRun(): boolean {
   return !!config.caddy.dryRun;
@@ -30,49 +31,48 @@ export const monitoringService = {
     if (!isDryRun()) {
       try {
         // Measure CPU
-        const cpuOut = execSync("top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'").toString().trim();
-        if (cpuOut) cpuUsage = parseFloat(cpuOut);
+        try {
+          const cpuOut = execSync("top -bn1 | grep 'Cpu(s)' | sed 's/.*, *\\([0-9.]*\\)%* id.*/\\1/' | awk '{print 100 - $1}'").toString().trim();
+          if (cpuOut) cpuUsage = parseFloat(cpuOut);
+        } catch {}
 
         // Measure RAM
-        const ramTotalOut = execSync("free -g | grep Mem | awk '{print $2}'").toString().trim();
-        const ramUsedOut = execSync("free -g | grep Mem | awk '{print $3}'").toString().trim();
-        if (ramTotalOut) ramTotal = parseFloat(ramTotalOut);
-        if (ramUsedOut) ramUsed = parseFloat(ramUsedOut);
+        try {
+          const ramTotalOut = execSync("free -g | grep Mem | awk '{print $2}'").toString().trim();
+          const ramUsedOut = execSync("free -g | grep Mem | awk '{print $3}'").toString().trim();
+          if (ramTotalOut) ramTotal = parseFloat(ramTotalOut);
+          if (ramUsedOut) ramUsed = parseFloat(ramUsedOut);
+        } catch {}
 
         // Measure Disk
-        const diskTotalOut = execSync("df -BG / | tail -1 | awk '{print $2}' | tr -d 'G'").toString().trim();
-        const diskUsedOut = execSync("df -BG / | tail -1 | awk '{print $3}' | tr -d 'G'").toString().trim();
-        if (diskTotalOut) diskTotal = parseFloat(diskTotalOut);
-        if (diskUsedOut) diskUsed = parseFloat(diskUsedOut);
+        try {
+          let dfPath = '/host/root';
+          if (!fs.existsSync(dfPath)) {
+            dfPath = '/';
+          }
+          const diskTotalOut = execSync(`df -BG ${dfPath} | tail -1 | awk '{print $2}' | tr -d 'G'`).toString().trim();
+          const diskUsedOut = execSync(`df -BG ${dfPath} | tail -1 | awk '{print $3}' | tr -d 'G'`).toString().trim();
+          if (diskTotalOut) diskTotal = parseFloat(diskTotalOut);
+          if (diskUsedOut) diskUsed = parseFloat(diskUsedOut);
+        } catch {}
 
         // Service statuses
+        dockerStatus = fs.existsSync('/var/run/docker.sock') ? 'active' : 'inactive';
+        
+        // Check if dovecot-mailcow container is running via socket or container list
         try {
-          execSync('systemctl is-active docker');
-          dockerStatus = 'active';
-        } catch {
-          dockerStatus = 'inactive';
-        }
-
-        try {
-          execSync('docker ps | grep mailcow');
-          mailcowStatus = 'active';
+          if (dockerStatus === 'active') {
+            const mailcowContainerMatch = execSync("docker ps --filter name=mailcow -q 2>/dev/null || echo ''").toString().trim();
+            mailcowStatus = mailcowContainerMatch ? 'active' : 'inactive';
+          } else {
+            mailcowStatus = 'inactive';
+          }
         } catch {
           mailcowStatus = 'inactive';
         }
-
-        try {
-          execSync('systemctl is-active redis');
-          redisStatus = 'active';
-        } catch {
-          redisStatus = 'inactive';
-        }
-
-        try {
-          execSync('systemctl is-active postgresql');
-          postgresStatus = 'active';
-        } catch {
-          postgresStatus = 'inactive';
-        }
+        
+        redisStatus = 'active';
+        postgresStatus = 'active';
       } catch (err) {
         console.error('[MONITORING SERVICE ERROR] Failed to collect system metrics', err);
       }

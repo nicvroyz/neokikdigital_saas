@@ -25,9 +25,30 @@ import { queueService } from './services/queueService';
 import { schedulerService } from './services/schedulerService';
 import { workerProcessor } from './services/workerProcessor';
 import { rateLimiter } from './middleware/rateLimiter';
+import fs from 'fs';
+import path from 'path';
 
 // Validate configuration environment variables before server initialization
 validateConfig();
+
+// Verify and initialize storage directories
+const storageDirs = [
+  config.infrastructure.clientSitesPath,
+  config.infrastructure.backupPath,
+  config.infrastructure.storagePath,
+  path.join(config.infrastructure.storagePath, 'migrations')
+];
+
+for (const dir of storageDirs) {
+  if (!fs.existsSync(dir)) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      console.log(`[INIT] Created directory: ${dir}`);
+    } catch (err) {
+      console.error(`[INIT] Error creating directory ${dir}:`, err);
+    }
+  }
+}
 
 const app = express();
 

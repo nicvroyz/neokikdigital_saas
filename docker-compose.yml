@@ -33,6 +33,15 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME:-neokik_saas}
       JWT_SECRET: ${JWT_SECRET}
+      CLIENT_SITES_PATH: /srv/neokik/sites
+      BACKUP_PATH: /srv/neokik/backups
+      STORAGE_PATH: /srv/neokik/storage
+    volumes:
+      - /etc/os-release:/host/os-release:ro
+      - /etc/hostname:/host/hostname:ro
+      - /:/host/root:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /srv/neokik:/srv/neokik
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,6 +66,7 @@ services:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
+      - /srv/neokik/sites:/srv/neokik/sites:ro
     depends_on:
       - frontend
       - backend

@@ -79,7 +79,7 @@ export const healthService = {
     checks.push({
       name: 'Conexión a Base de Datos',
       status: 'PASS',
-      description: 'El archivo wp-config.php / .env fue reconfigurado y la base de datos PostgreSQL conectada.'
+      description: 'El archivo wp-config.php / .env fue reconfigurado y la base de datos MySQL/MariaDB conectada.'
     });
 
     // PHP Execution check

@@ -28,7 +28,7 @@ export const config = {
   },
   caddy: {
     configDir: process.env.CADDY_CONFIG_DIR || '/etc/caddy/conf.d',
-    baseDocRoot: process.env.BASE_DOC_ROOT || '/srv/neokik',
+    baseDocRoot: process.env.CLIENT_SITES_PATH || '/srv/neokik/sites',
     dryRun: process.env.CADDY_DRY_RUN === 'true' || true, // Defaults to dry run for safety if not on real Linux server
   },
   mailcow: {
@@ -39,6 +39,9 @@ export const config = {
     uploadsDir: process.env.UPLOADS_DIR || '/srv/neokik/storage/migrations',
     maxUploadSize: parseInt(process.env.MAX_UPLOAD_SIZE || '5368709120', 10), // 5GB
     vpsIP: process.env.VPS_IP || '152.0.0.1',
+    clientSitesPath: process.env.CLIENT_SITES_PATH || '/srv/neokik/sites',
+    backupPath: process.env.BACKUP_PATH || '/srv/neokik/backups',
+    storagePath: process.env.STORAGE_PATH || '/srv/neokik/storage',
   },
   server: {
     ip: process.env.SERVER_IP || '0.0.0.0',

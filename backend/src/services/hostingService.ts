@@ -50,7 +50,7 @@ ${domain}, www.${domain} {
         // Reload Caddy container (or native systemctl reload)
         const isDryRun = !!config.caddy.dryRun;
         if (!isDryRun) {
-          exec('docker exec caddy-proxy caddy reload --config /etc/caddy/Caddyfile', (err, stdout, stderr) => {
+          exec('docker exec neokik-caddy caddy reload --config /etc/caddy/Caddyfile', (err, stdout, stderr) => {
             if (err) {
               console.warn(`[HOSTING ENGINE WARNING] Caddy reload inside container failed, trying native reload...`);
               exec('caddy reload', (nativeErr, nativeStdout, nativeStderr) => {

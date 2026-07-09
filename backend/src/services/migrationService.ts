@@ -84,7 +84,7 @@ export const migrationService = {
 
       const domain = mig.domain || 'midominio.cl';
       const backupPath = mig.backup_path;
-      const destDir = path.join(os.tmpdir(), 'neokik-migration', migrationId);
+      const destDir = path.join(config.infrastructure.storagePath, 'migrations', 'extracted', migrationId);
 
       // Reset logs
       await query('DELETE FROM migration_logs WHERE migration_id = $1', [migrationId]);
@@ -146,6 +146,34 @@ export const migrationService = {
       } else if (mig.detected_project_type === 'HTML') {
         await staticHtmlPlugin.onMigrate(domain, destDir, dbConfig);
       }
+
+      // Copy files to final sites directory
+      log('Copiando archivos del sitio migrado a sites/');
+      await this.logStep(migrationId, 'site:deploying', 'Desplegando archivos del sitio al almacenamiento de hosting...', 'RUNNING', 57);
+      
+      const docRoot = `${config.infrastructure.clientSitesPath}/${domain}`;
+      if (!fs.existsSync(docRoot)) {
+        fs.mkdirSync(docRoot, { recursive: true });
+      }
+      
+      // Determine where the web files are
+      let srcWebPath = destDir;
+      const possibleWebPaths = [
+        path.join(destDir, 'public_html'),
+        path.join(destDir, 'homedir', 'public_html'),
+        path.join(destDir, 'homedir')
+      ];
+      
+      for (const p of possibleWebPaths) {
+        if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+          srcWebPath = p;
+          break;
+        }
+      }
+      
+      log(`Copiando de ${srcWebPath} a ${docRoot}`);
+      await storageService.copy(srcWebPath, docRoot);
+      await this.logStep(migrationId, 'site:deploying', 'Archivos del sitio desplegados correctamente.', 'SUCCESS', 59);
 
       // Step 3: Create Container (40%)
       log('Paso 3: Creando contenedor Docker...');
@@ -389,7 +417,7 @@ export const migrationService = {
             last_payment_date: new Date().toISOString().split('T')[0],
             expiration_date: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().split('T')[0], // 30 days initial trial
             grace_period_days: 5,
-            doc_root: `/srv/neokik/sites/${domain}`,
+            doc_root: `${config.infrastructure.clientSitesPath}/${domain}`,
             notes: `Cliente registrado automáticamente a través del motor de migración cPanel el ${new Date().toLocaleDateString('es-CL')}.`
           });
           log(`Registro del cliente para ${domain} creado con éxito.`);
@@ -402,38 +430,7 @@ export const migrationService = {
 
       eventBus.emit('migration:completed', { migrationId });
 
-      // Restore database state / client state to the last consistent checkpoint
-      try {
-        log('Rollback: Eliminando registro de cliente...');
-        await query('DELETE FROM clients WHERE domain = $1', [domain]);
-      } catch (err) { /* ignore */ }
-
-      // Restore database state / client state to the last consistent checkpoint
-      try {
-        if (!mig.client_id) {
-          log('Rollback: Eliminando registro de cliente auto-creado...');
-          await query('DELETE FROM clients WHERE domain = $1', [domain]);
-        } else {
-          log('Rollback: Cliente pre-existía antes de la migración. Conservando registro de cliente.');
-        }
-      } catch (err) { /* ignore */ }
-
-      // Cleanup target host site directory if created and safe
-      try {
-        const baseRoot = path.resolve(config.caddy.baseDocRoot);
-        const targetSiteDir = path.resolve(path.join(baseRoot, domain));
-        
-        if (targetSiteDir.startsWith(baseRoot) && targetSiteDir !== baseRoot && domain && domain.includes('.')) {
-          if (fs.existsSync(targetSiteDir)) {
-            log(`Rollback: Eliminando directorio del sitio verificado: ${targetSiteDir}`);
-            await storageService.cleanup(targetSiteDir);
-          }
-        }
-      } catch (dirErr) {
-        log(`Advertencia en Rollback: falló limpieza de directorio: ${(dirErr as Error).message}`);
-      }
-
-      // Cleanup files
+      // Cleanup temporary files only on success
       await storageService.cleanup(destDir);
 
     } catch (err) {
@@ -452,6 +449,14 @@ export const migrationService = {
       eventBus.emit('migration:failed', { migrationId, error: errMsg });
       
       await this.logStep(migrationId, 'execution_error', `Error crítico: ${errMsg}. Iniciando Rollback automático...`, 'FAILED', 0);
+      
+      // Perform automatic rollback on failure
+      try {
+        await this.rollbackMigration(migrationId);
+      } catch (rollbackErr) {
+        log(`Error durante rollback automático: ${(rollbackErr as Error).message}`);
+      }
+      
       throw err;
     }
     });
@@ -490,7 +495,7 @@ export const migrationService = {
 
     const domain = mig.domain;
     const rollbackStep = mig.rollback_step;
-    const destDir = path.join(__dirname, '../../uploads/extracted', migrationId);
+    const destDir = path.join(config.infrastructure.storagePath, 'migrations', 'extracted', migrationId);
 
     try {
       if (rollbackStep === 'REMOVE_CONTAINER' || rollbackStep === 'DROP_DATABASE' || rollbackStep === 'CLEANUP_EXTRACTED') {
@@ -504,6 +509,28 @@ export const migrationService = {
         await databaseService.dropDatabase(dbName);
       }
       
+      // Cleanup client database record if auto-created
+      try {
+        if (!mig.client_id) {
+          log('Rollback: Eliminando registro de cliente auto-creado...');
+          await query('DELETE FROM clients WHERE domain = $1', [domain]);
+        }
+      } catch (err) { /* ignore */ }
+
+      // Cleanup target host site directory
+      try {
+        const baseRoot = path.resolve(config.infrastructure.clientSitesPath);
+        const targetSiteDir = path.resolve(path.join(baseRoot, domain));
+        if (targetSiteDir.startsWith(baseRoot) && targetSiteDir !== baseRoot && domain && domain.includes('.')) {
+          if (fs.existsSync(targetSiteDir)) {
+            log(`Rollback: Eliminando directorio del sitio verificado: ${targetSiteDir}`);
+            await storageService.cleanup(targetSiteDir);
+          }
+        }
+      } catch (dirErr) {
+        log(`Advertencia en Rollback: falló limpieza de directorio: ${(dirErr as Error).message}`);
+      }
+
       // Cleanup files
       await storageService.cleanup(destDir);
       

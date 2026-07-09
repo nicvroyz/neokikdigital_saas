@@ -1,5 +1,6 @@
 import { query } from '../config/db';
 import { hostingService } from './hostingService';
+import { config } from '../config/env';
 
 export interface ClientData {
   id?: string;
@@ -56,7 +57,8 @@ export const clientService = {
   },
 
   async createClient(data: ClientData) {
-    const docRoot = data.doc_root || `/srv/neokik/sites/${data.domain.replace(/[^a-z0-9]/gi, '_')}`;
+    const sanitizedDomain = data.domain.replace(/[^a-z0-9.-]/gi, '_');
+    const docRoot = data.doc_root || `${config.infrastructure.clientSitesPath}/${sanitizedDomain}`;
     const status = data.status || 'ACTIVE';
     const graceDays = data.grace_period_days !== undefined ? data.grace_period_days : 5;
 

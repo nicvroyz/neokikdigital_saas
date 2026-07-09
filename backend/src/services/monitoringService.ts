@@ -2,6 +2,7 @@ import { query } from '../config/db';
 import { eventBus } from './eventBus';
 import { execSync } from 'child_process';
 import { config } from '../config/env';
+import { randomUUID } from 'crypto';
 
 function isDryRun(): boolean {
   return !!config.caddy.dryRun;
@@ -77,7 +78,7 @@ export const monitoringService = {
       }
     }
 
-    const metricId = `metric-${Date.now()}`;
+    const metricId = randomUUID();
     const result = await query(
       `INSERT INTO server_health_metrics (id, cpu_usage, ram_total_gb, ram_used_gb, disk_total_gb, disk_used_gb, docker_status, mailcow_status, redis_status, postgres_status, response_time_ms)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,

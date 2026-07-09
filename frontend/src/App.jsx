@@ -40,13 +40,20 @@ export default function App() {
       if (cliRes.ok) {
         const rawClients = await cliRes.json();
         
-        // Filter: ONLY display clients that are actually registered in the database (validated by UUID format).
-        // Mock store clients (having non-UUID IDs like 'cli-1') are filtered out.
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        const realClients = rawClients.filter(c => uuidRegex.test(c.id));
+        // Filter out specific seed data UUIDs (from legacy seed.sql) and mock memory IDs.
+        // This ensures the dashboard is clean, but allows future real registration of these client domains with random UUIDs.
+        const seedIds = [
+          'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', // Papeles Concepción
+          'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', // Rabbo Restaurant
+          'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', // Boutique Imprenta
+          'cli-1',
+          'cli-2',
+          'cli-3'
+        ];
+        const realClients = rawClients.filter(c => !seedIds.includes(c.id));
         setClients(realClients);
 
-        // Recalculate stats dynamically from real database clients to prevent fake totals/MRR
+        // Recalculate stats dynamically from real database clients
         const calculatedStats = {
           total_clients: realClients.length,
           active_clients: realClients.filter(c => c.status === 'ACTIVE').length,
@@ -69,8 +76,8 @@ export default function App() {
           // Filter out mock data inside summary
           const realSummary = {
             stats: calculatedStats,
-            upcoming_renewals: (rawSummary.upcoming_renewals || []).filter(r => uuidRegex.test(r.id)),
-            recent_payments: (rawSummary.recent_payments || []).filter(p => uuidRegex.test(p.client_id) || uuidRegex.test(p.id))
+            upcoming_renewals: (rawSummary.upcoming_renewals || []).filter(r => !seedIds.includes(r.id)),
+            recent_payments: (rawSummary.recent_payments || []).filter(p => !seedIds.includes(p.client_id) && !seedIds.includes(p.id))
           };
           setSummary(realSummary);
         }

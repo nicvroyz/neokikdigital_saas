@@ -106,7 +106,7 @@ MAILCOW_API_URL=https://mail.yourdomain.cl
 MAILCOW_API_KEY=your-mailcow-api-key
 
 # Infrastructure
-NGINX_DRY_RUN=false
+CADDY_DRY_RUN=false
 UPLOADS_DIR=/opt/neokik/backend/uploads/migrations
 MAX_UPLOAD_SIZE=17179869184
 VPS_IP=YOUR_VPS_IP
@@ -197,10 +197,6 @@ curl https://api.yourdomain.cl/api/health
 Expected response:
 ```json
 {
-  "status": "healthy",
-  "database": "connected",
-  "external_services": "available",
-  "disk": "ok",
-  "uptime": 123
+  "status": "healthy"
 }
 ```

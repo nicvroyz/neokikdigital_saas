@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
+const bcrypt = require('bcrypt');
 require('dotenv').config();
 
 const pool = new Pool({
@@ -22,6 +23,37 @@ async function init() {
 
     await pool.query(seedSql);
     console.log('✅ Seed data inserted successfully.');
+
+    // Securely seed the initial admin account
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@neokikdigital.com';
+    let adminPass = process.env.ADMIN_PASSWORD;
+    let isRandom = false;
+
+    if (!adminPass) {
+      const crypto = require('crypto');
+      adminPass = crypto.randomBytes(8).toString('hex'); // 16 char random password
+      isRandom = true;
+    }
+
+    const saltRounds = 10;
+    const passwordHash = await bcrypt.hash(adminPass, saltRounds);
+
+    await pool.query(
+      `INSERT INTO admins (id, email, password_hash, name)
+       VALUES ($1, $2, $3, $4) ON CONFLICT (email) DO NOTHING`,
+      [`admin-${Date.now()}`, adminEmail, passwordHash, 'Neokik Admin']
+    );
+
+    console.log('================================================================');
+    console.log('✅ DATABASE INITIALIZATION COMPLETED SUCCESSFULLY!');
+    console.log('   Initial Admin Account:');
+    console.log(`   - Email:    ${adminEmail}`);
+    if (isRandom) {
+      console.log(`   - Password: ${adminPass} (GENERATED SECURELY — SAVE IT!)`);
+    } else {
+      console.log('   - Password: [CONFIGURED VIA ENV VARIABLES]');
+    }
+    console.log('================================================================');
 
     process.exit(0);
   } catch (err) {

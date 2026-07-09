@@ -1,13 +1,5 @@
 -- Seed Data for Neokik Digital SaaS with Operations & Communications Modules
 
--- Seed Admin
-INSERT INTO admins (email, password_hash, name)
-VALUES (
-    'admin@neokikdigital.com',
-    '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeg6Lruj3vjPGga31lW',
-    'Neokik Admin'
-) ON CONFLICT (email) DO NOTHING;
-
 -- Seed Sample Clients
 INSERT INTO clients (
     id, name, company_name, email, phone, domain, service_type, plan_interval, amount_per_period, currency, status, last_payment_date, expiration_date, grace_period_days, doc_root

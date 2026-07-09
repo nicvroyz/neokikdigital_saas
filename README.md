@@ -81,9 +81,7 @@ npm run dev
 ```
 Abre tu navegador en [http://localhost:3000](http://localhost:3000).
 
-**Credenciales por defecto:**
-- **Email**: `admin@neokikdigital.com`
-- **Password**: `admin123`
+**Credenciales de Acceso:** Las credenciales del administrador inicial se generan y muestran de manera segura en la consola durante el proceso de inicialización de la base de datos (`npm run db:init`).
 
 ---
 

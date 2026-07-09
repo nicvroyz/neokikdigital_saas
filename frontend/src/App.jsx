@@ -39,15 +39,14 @@ export default function App() {
 
       if (cliRes.ok) {
         const rawClients = await cliRes.json();
-        // Filter out fake/mock clients from visual display by domain name
-        const realClients = rawClients.filter(c => 
-          c.domain !== 'papelesconcepcion.cl' && 
-          c.domain !== 'rabborestaurant.cl' && 
-          c.domain !== 'boutiqueimprenta.cl'
-        );
+        
+        // Filter: ONLY display clients that are actually registered in the database (validated by UUID format).
+        // Mock store clients (having non-UUID IDs like 'cli-1') are filtered out.
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const realClients = rawClients.filter(c => uuidRegex.test(c.id));
         setClients(realClients);
 
-        // Recalculate stats dynamically from real clients to prevent fake totals/MRR
+        // Recalculate stats dynamically from real database clients to prevent fake totals/MRR
         const calculatedStats = {
           total_clients: realClients.length,
           active_clients: realClients.filter(c => c.status === 'ACTIVE').length,
@@ -70,19 +69,8 @@ export default function App() {
           // Filter out mock data inside summary
           const realSummary = {
             stats: calculatedStats,
-            upcoming_renewals: (rawSummary.upcoming_renewals || []).filter(r => 
-              r.domain !== 'papelesconcepcion.cl' && 
-              r.domain !== 'rabborestaurant.cl' && 
-              r.domain !== 'boutiqueimprenta.cl'
-            ),
-            recent_payments: (rawSummary.recent_payments || []).filter(p => 
-              p.client_name !== 'Papeles Concepción' && 
-              p.client_name !== 'Rabbo Restaurant' && 
-              p.client_name !== 'Boutique Imprenta' &&
-              p.domain !== 'papelesconcepcion.cl' &&
-              p.domain !== 'rabborestaurant.cl' &&
-              p.domain !== 'boutiqueimprenta.cl'
-            )
+            upcoming_renewals: (rawSummary.upcoming_renewals || []).filter(r => uuidRegex.test(r.id)),
+            recent_payments: (rawSummary.recent_payments || []).filter(p => uuidRegex.test(p.client_id) || uuidRegex.test(p.id))
           };
           setSummary(realSummary);
         }

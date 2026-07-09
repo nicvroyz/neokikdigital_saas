@@ -39,37 +39,53 @@ export default function App() {
 
       if (cliRes.ok) {
         const rawClients = await cliRes.json();
-        // Filter out fake/mock clients from visual display
-        const realClients = rawClients.filter(c => c.id !== 'cli-1' && c.id !== 'cli-2' && c.id !== 'cli-3');
+        // Filter out fake/mock clients from visual display by domain name
+        const realClients = rawClients.filter(c => 
+          c.domain !== 'papelesconcepcion.cl' && 
+          c.domain !== 'rabborestaurant.cl' && 
+          c.domain !== 'boutiqueimprenta.cl'
+        );
         setClients(realClients);
-      }
 
-      if (sumRes.ok) {
-        const rawSummary = await sumRes.json();
-        // Filter out mock data inside summary
-        const realSummary = {
-          stats: rawSummary.stats ? {
-            total_clients: rawSummary.stats.total_clients,
-            active_clients: rawSummary.stats.active_clients,
-            expired_clients: rawSummary.stats.expired_clients,
-            suspended_clients: rawSummary.stats.suspended_clients,
-            mrr: rawSummary.stats.mrr
-          } : { total_clients: 0, active_clients: 0, expired_clients: 0, suspended_clients: 0, mrr: 0 },
-          upcoming_renewals: (rawSummary.upcoming_renewals || []).filter(r => r.id !== 'cli-1' && r.id !== 'cli-2' && r.id !== 'cli-3'),
-          recent_payments: (rawSummary.recent_payments || []).filter(p => p.id !== 'pmt-1' && p.id !== 'pmt-2' && p.id !== 'pmt-3' && p.client_name !== 'Papeles Concepción' && p.client_name !== 'Rabbo Restaurant' && p.client_name !== 'Boutique Imprenta')
+        // Recalculate stats dynamically from real clients to prevent fake totals/MRR
+        const calculatedStats = {
+          total_clients: realClients.length,
+          active_clients: realClients.filter(c => c.status === 'ACTIVE').length,
+          expired_clients: realClients.filter(c => c.status === 'EXPIRED').length,
+          suspended_clients: realClients.filter(c => c.status === 'SUSPENDED').length,
+          mrr: realClients.reduce((sum, c) => {
+            if (c.status === 'ACTIVE') {
+              const amount = Number(c.amount_per_period || 0);
+              if (c.plan_interval === 'QUARTERLY') return sum + (amount / 3);
+              if (c.plan_interval === 'SEMI_ANNUAL') return sum + (amount / 6);
+              if (c.plan_interval === 'ANNUAL') return sum + (amount / 12);
+              return sum + amount;
+            }
+            return sum;
+          }, 0)
         };
-        
-        // Reset stats if they contain mock counts
-        if (realSummary.stats.total_clients === 3 || realSummary.stats.mrr === 155333 || realSummary.stats.mrr === 337000 || realSummary.stats.total_clients === 4) {
-          realSummary.stats = {
-            total_clients: 0,
-            active_clients: 0,
-            expired_clients: 0,
-            suspended_clients: 0,
-            mrr: 0
+
+        if (sumRes.ok) {
+          const rawSummary = await sumRes.json();
+          // Filter out mock data inside summary
+          const realSummary = {
+            stats: calculatedStats,
+            upcoming_renewals: (rawSummary.upcoming_renewals || []).filter(r => 
+              r.domain !== 'papelesconcepcion.cl' && 
+              r.domain !== 'rabborestaurant.cl' && 
+              r.domain !== 'boutiqueimprenta.cl'
+            ),
+            recent_payments: (rawSummary.recent_payments || []).filter(p => 
+              p.client_name !== 'Papeles Concepción' && 
+              p.client_name !== 'Rabbo Restaurant' && 
+              p.client_name !== 'Boutique Imprenta' &&
+              p.domain !== 'papelesconcepcion.cl' &&
+              p.domain !== 'rabborestaurant.cl' &&
+              p.domain !== 'boutiqueimprenta.cl'
+            )
           };
+          setSummary(realSummary);
         }
-        setSummary(realSummary);
       }
     } catch (err) {
       console.error('Error loading dashboard data:', err);

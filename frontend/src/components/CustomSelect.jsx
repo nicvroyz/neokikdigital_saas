@@ -32,7 +32,7 @@ export default function CustomSelect({ options = [], value, onChange, placeholde
           width: '100%',
           display: 'flex',
           alignItems: 'center',
-          justify: 'space-between',
+          justifyContent: 'space-between',
           padding: '0.75rem 1rem',
           backgroundColor: '#ffffff',
           border: isOpen ? '1.5px solid var(--brand-indigo)' : '1px solid var(--border-default)',
@@ -88,7 +88,7 @@ export default function CustomSelect({ options = [], value, onChange, placeholde
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justify: 'space-between',
+                  justifyContent: 'space-between',
                   padding: '0.7rem 0.85rem',
                   borderRadius: 'var(--radius-sm)',
                   backgroundColor: isSelected ? '#eef2ff' : 'transparent',

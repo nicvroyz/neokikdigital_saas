@@ -13,7 +13,7 @@ export default function InfraClientPanel({ token, clients }) {
   const [diskUsage, setDiskUsage] = useState(null);
   const [emails, setEmails] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [logType, setLogType] = useState('nginx');
+  const [logType, setLogType] = useState('caddy');
   const [message, setMessage] = useState(null);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [sslStatus, setSslStatus] = useState({ valid: true, expires_in: '82 días', issuer: "Let's Encrypt" });
@@ -44,13 +44,7 @@ export default function InfraClientPanel({ token, clients }) {
           const data = await res.json();
           setDiskUsage(data);
         } else {
-          // Fallback mock
-          setDiskUsage({
-            total_mb: 2048,
-            used_mb: 847,
-            usage_percent: 41.4,
-            breakdown: { website_files_mb: 523, database_mb: 189, email_mb: 87, logs_mb: 34, backups_mb: 14 }
-          });
+          setDiskUsage(null);
         }
       } else if (activeSection === 'email') {
         const res = await fetch(`/api/infrastructure/clients/${selectedClient}/emails`, { headers });
@@ -58,11 +52,7 @@ export default function InfraClientPanel({ token, clients }) {
           const data = await res.json();
           setEmails(data.emails || []);
         } else {
-          // Fallback mock
-          setEmails([
-            { address: `contacto@${currentClientObj?.domain || 'midominio.cl'}`, quota_mb: 1024, used_mb: 87, status: 'ACTIVE', created_at: '2026-05-01T10:00:00Z' },
-            { address: `info@${currentClientObj?.domain || 'midominio.cl'}`, quota_mb: 512, used_mb: 23, status: 'ACTIVE', created_at: '2026-05-15T14:00:00Z' }
-          ]);
+          setEmails([]);
         }
       } else if (activeSection === 'logs') {
         const res = await fetch(`/api/infrastructure/clients/${selectedClient}/logs?type=${logType}`, { headers });
@@ -70,14 +60,7 @@ export default function InfraClientPanel({ token, clients }) {
           const data = await res.json();
           setLogs(data.logs || []);
         } else {
-          // Fallback mock
-          setLogs([
-            { timestamp: new Date(Date.now() - 300000).toISOString(), level: 'INFO', message: 'GET /index.php - 200 OK - 45ms' },
-            { timestamp: new Date(Date.now() - 240000).toISOString(), level: 'INFO', message: 'GET /wp-admin/ - 200 OK - 120ms' },
-            { timestamp: new Date(Date.now() - 180000).toISOString(), level: 'WARNING', message: 'POST /xmlrpc.php - 403 Forbidden (blocked)' },
-            { timestamp: new Date(Date.now() - 120000).toISOString(), level: 'INFO', message: 'GET /wp-content/uploads/2026/06/imagen.webp - 200 OK - 8ms' },
-            { timestamp: new Date(Date.now() - 60000).toISOString(), level: 'INFO', message: 'GET /wp-json/wp/v2/posts - 200 OK - 95ms' },
-          ]);
+          setLogs([]);
         }
       }
     } catch {
@@ -94,10 +77,10 @@ export default function InfraClientPanel({ token, clients }) {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        showFeedback('Servicios reiniciados correctamente (Nginx + PHP-FPM).');
+        showFeedback('Contenedor del sitio reiniciado correctamente.');
       }
     } catch {
-      showFeedback('Servicios reiniciados correctamente (Simulado).');
+      showFeedback('Contenedor del sitio reiniciado correctamente (Simulado).');
     }
   };
 
@@ -298,7 +281,7 @@ export default function InfraClientPanel({ token, clients }) {
             {loading && (
               <div style={{
                 position: 'absolute', inset: 0, backgroundColor: 'rgba(255,255,255,0.7)',
-                display: 'flex', alignItems: 'center', justify: 'center', zIndex: 10, borderRadius: 'var(--radius-lg)'
+                display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, borderRadius: 'var(--radius-lg)'
               }}>
                 <RefreshCw size={32} className="spin" color="var(--brand-blue)" />
               </div>
@@ -315,14 +298,14 @@ export default function InfraClientPanel({ token, clients }) {
                   {/* Status Card */}
                   <div style={{ padding: '1.25rem', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)' }}>
                     <div style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-sub)', textTransform: 'uppercase', marginBottom: '0.55rem' }}>
-                      Servidor Nginx & PHP
+                      Contenedor Docker
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.85rem' }}>
                       <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#22c55e', display: 'inline-block' }}></span>
                       <strong style={{ fontSize: '1.05rem' }}>Activo (En Línea)</strong>
                     </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-sub)' }}>
-                      PHP Version: <span style={{ fontWeight: '800', color: 'var(--brand-blue)' }}>8.2 (FPM)</span>
+                      Servidor Web: <span style={{ fontWeight: '800', color: 'var(--brand-blue)' }}>Caddy Proxy</span>
                     </div>
                   </div>
 
@@ -479,7 +462,7 @@ export default function InfraClientPanel({ token, clients }) {
                     <div key={idx} style={{
                       display: 'flex',
                       alignItems: 'center',
-                      justify: 'space-between',
+                      justifyContent: 'space-between',
                       padding: '1rem 1.25rem',
                       border: '1px solid var(--border-default)',
                       borderRadius: 'var(--radius-md)',
@@ -549,8 +532,7 @@ export default function InfraClientPanel({ token, clients }) {
                   <div style={{ display: 'flex', gap: '0.55rem' }}>
                     <CustomSelect 
                       options={[
-                        { value: 'nginx', label: 'Nginx Access Logs' },
-                        { value: 'php', label: 'PHP Error Logs' },
+                        { value: 'caddy', label: 'Caddy Access Logs' },
                         { value: 'app', label: 'Application Logs' },
                       ]}
                       value={logType}

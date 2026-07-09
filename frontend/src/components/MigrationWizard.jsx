@@ -243,7 +243,7 @@ export default function MigrationWizard({ token, clients, onComplete }) {
         ],
         recommendations: [
           'Mantener habilitado PHP 8.2 para optimizar rendimiento de WordPress.',
-          'Configurar Nginx FastCGI Cache en la barra de administración.',
+          'Optimizar el almacenamiento de caché en la barra de administración.',
           'Apuntar registros NS al finalizar la validación.'
         ]
       };
@@ -465,9 +465,9 @@ export default function MigrationWizard({ token, clients, onComplete }) {
       { name: 'Sitio Web PHP en línea', status: 'PASS', description: 'Retorna código HTTP 200.' },
       { name: 'Conexión a Base de Datos', status: 'PASS', description: 'wp-config.php reconfigurado y conectado exitosamente.' },
       { name: 'Directorio de archivos y permisos', status: 'PASS', description: 'Propietario asignado a www-data (755/644).' },
-      { name: 'Configuración VirtualHost Nginx', status: 'PASS', description: 'Configuración de redirecciones HTTPS activa.' },
+      { name: 'Configuración del Proxy Caddy', status: 'PASS', description: 'Configuración de redirecciones HTTPS activa.' },
       { name: 'Buzones de Correo Mailcow', status: 'PASS', description: '3 cuentas creadas con sus respectivas cuotas.' },
-      { name: 'Verificación Let\'s Encrypt SSL', status: 'PASS', description: 'Certificado emitido.' }
+      { name: 'Verificación de Certificado SSL', status: 'PASS', description: 'Certificado emitido.' }
     ];
 
     // Derive domain dynamically from analysis report
@@ -612,7 +612,7 @@ export default function MigrationWizard({ token, clients, onComplete }) {
                 <div style={{
                   width: '40px', height: '40px', borderRadius: '50%', backgroundColor: backupType === 'CPANEL_FULL' ? '#eef2ff' : '#f1f5f9',
                   color: backupType === 'CPANEL_FULL' ? 'var(--brand-blue)' : 'var(--text-sub)',
-                  display: 'flex', alignItems: 'center', justify: 'center', fontWeight: '800'
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800'
                 }}>
                   A
                 </div>
@@ -633,7 +633,7 @@ export default function MigrationWizard({ token, clients, onComplete }) {
                 <div style={{
                   width: '40px', height: '40px', borderRadius: '50%', backgroundColor: backupType === 'SEPARATE' ? '#eef2ff' : '#f1f5f9',
                   color: backupType === 'SEPARATE' ? 'var(--brand-blue)' : 'var(--text-sub)',
-                  display: 'flex', alignItems: 'center', justify: 'center', fontWeight: '800'
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800'
                 }}>
                   B
                 </div>
@@ -744,7 +744,7 @@ export default function MigrationWizard({ token, clients, onComplete }) {
       {/* STEP 2: SMART ANALYSIS SCANNER */}
       {currentStep === 2 && (
         <div className="card" style={{ padding: '3.5rem 2rem', textAlign: 'center' }}>
-          <div style={{ width: '80px', height: '80px', margin: '0 auto 1.5rem', borderRadius: '50%', backgroundColor: '#eef2ff', display: 'flex', alignItems: 'center', justify: 'center' }}>
+          <div style={{ width: '80px', height: '80px', margin: '0 auto 1.5rem', borderRadius: '50%', backgroundColor: '#eef2ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Sparkles size={40} className="spin" color="var(--brand-blue)" />
           </div>
           <h3 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.45rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.55rem' }}>
@@ -772,7 +772,7 @@ export default function MigrationWizard({ token, clients, onComplete }) {
       {/* STEP 3: PRE-MIGRATION SIMULATION REPORT */}
       {currentStep === 3 && !simulationReport && (
         <div className="card" style={{ padding: '3.5rem 2rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ width: '80px', height: '80px', margin: '0 auto 1.5rem', borderRadius: '50%', backgroundColor: '#fff7ed', display: 'flex', alignItems: 'center', justify: 'center' }}>
+          <div style={{ width: '80px', height: '80px', margin: '0 auto 1.5rem', borderRadius: '50%', backgroundColor: '#fff7ed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Sparkles size={40} className="spin" color="var(--brand-yellow)" />
           </div>
           <h3 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.45rem', fontWeight: '800', color: 'var(--text-main)', marginBottom: '0.55rem' }}>
@@ -813,11 +813,11 @@ export default function MigrationWizard({ token, clients, onComplete }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                       <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-sub)' }}>{item.available}</span>
                       {item.status === 'PASS' ? (
-                        <span style={{ color: '#22c55e', backgroundColor: '#dcfce7', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justify: 'center', fontWeight: 'bold' }}>✓</span>
+                        <span style={{ color: '#22c55e', backgroundColor: '#dcfce7', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>✓</span>
                       ) : item.status === 'WARNING' ? (
-                        <span style={{ color: '#d97706', backgroundColor: '#fef3c7', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justify: 'center', fontWeight: 'bold' }}>⚠</span>
+                        <span style={{ color: '#d97706', backgroundColor: '#fef3c7', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>⚠</span>
                       ) : (
-                        <span style={{ color: '#ef4444', backgroundColor: '#fee2e2', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justify: 'center', fontWeight: 'bold' }}>✗</span>
+                        <span style={{ color: '#ef4444', backgroundColor: '#fee2e2', borderRadius: '50%', width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>✗</span>
                       )}
                     </div>
                   </div>
@@ -988,7 +988,7 @@ export default function MigrationWizard({ token, clients, onComplete }) {
           }}>
             <div style={{
               width: '60px', height: '60px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.2)',
-              color: 'white', display: 'flex', alignItems: 'center', justify: 'center', margin: '0 auto 1rem'
+              color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1rem'
             }}>
               <ShieldCheck size={32} />
             </div>

@@ -141,16 +141,16 @@ export default function App() {
     }
   };
 
-  const handleSyncNginx = async () => {
+  const handleSyncCaddy = async () => {
     try {
-      const res = await fetch('/api/hosting/sync-nginx', {
+      const res = await fetch('/api/hosting/sync-caddy', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      alert(data.message || 'Nginx synced successfully');
+      alert(data.message || 'Caddy synced successfully');
     } catch (err) {
-      console.error('Nginx sync error:', err);
+      console.error('Caddy sync error:', err);
     }
   };
 
@@ -180,7 +180,7 @@ export default function App() {
               setActiveTab('clients');
             }}
             onTriggerAudit={handleTriggerAudit}
-            onSyncNginx={handleSyncNginx}
+            onSyncCaddy={handleSyncCaddy}
           />
         )}
 
@@ -222,7 +222,7 @@ export default function App() {
         {activeTab === 'hosting' && (
           <HostingPage
             clients={clients}
-            onSyncNginx={handleSyncNginx}
+            onSyncCaddy={handleSyncCaddy}
           />
         )}
 

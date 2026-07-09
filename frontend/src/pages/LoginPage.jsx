@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { Lock, Mail, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
 
 export default function LoginPage({ onLoginSuccess }) {
-  const [email, setEmail] = useState('admin@neokikdigital.com');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -41,7 +41,7 @@ export default function LoginPage({ onLoginSuccess }) {
         minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
-        justify: 'center',
+        justifyContent: 'center',
         background: 'radial-gradient(at 0% 0%, rgba(40, 73, 153, 0.15) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(245, 130, 32, 0.12) 0px, transparent 50%), #f8fafc',
         padding: '1.5rem',
       }}

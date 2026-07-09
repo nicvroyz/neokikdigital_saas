@@ -2,16 +2,16 @@ import React, { useState } from 'react';
 import StatsCard from '../components/StatsCard';
 import { DollarSign, CheckCircle2, AlertTriangle, XCircle, Plus, Server, ArrowRight, Zap, Calendar, ExternalLink, RefreshCw, CheckCircle, CreditCard, ArrowUpRight } from 'lucide-react';
 
-export default function DashboardPage({ summary, onAddClient, onNavigateClients, onTriggerAudit, onSyncNginx }) {
+export default function DashboardPage({ summary, onAddClient, onNavigateClients, onTriggerAudit, onSyncCaddy }) {
   const [isAuditing, setIsAuditing] = useState(false);
   const [auditReport, setAuditReport] = useState(null);
 
   const stats = summary?.stats || {
-    total_clients: 4,
-    active_clients: 2,
-    expired_clients: 1,
-    suspended_clients: 1,
-    mrr: 155333,
+    total_clients: 0,
+    active_clients: 0,
+    expired_clients: 0,
+    suspended_clients: 0,
+    mrr: 0,
   };
 
   const upcoming = summary?.upcoming_renewals || [];
@@ -60,8 +60,8 @@ export default function DashboardPage({ summary, onAddClient, onNavigateClients,
           <p>Gestión centralizada de hosting web, motor de suscripciones recurrentes e ingresos mensuales</p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button className="btn btn-secondary" onClick={onSyncNginx} title="Sincronizar VirtualHosts en Nginx">
-            <Server size={16} color="#284999" /> Sincronizar Nginx Proxy
+          <button className="btn btn-secondary" onClick={onSyncCaddy} title="Sincronizar Rutas en Caddy">
+            <Server size={16} color="#284999" /> Sincronizar Caddy Proxy
           </button>
           <button className="btn btn-primary" onClick={onAddClient}>
             <Plus size={16} /> Agregar Sitio Web de Cliente
@@ -79,7 +79,7 @@ export default function DashboardPage({ summary, onAddClient, onNavigateClients,
           marginBottom: '1.75rem',
           boxShadow: '0 15px 35px -5px rgba(40, 73, 153, 0.4)',
           display: 'flex',
-          justify: 'space-between',
+          justifyContent: 'space-between',
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '1.5rem',
@@ -93,7 +93,7 @@ export default function DashboardPage({ summary, onAddClient, onNavigateClients,
             Control Automatizado de Hosting y Suscripciones
           </h2>
           <p style={{ opacity: 0.9, fontSize: '0.925rem', maxWidth: '600px' }}>
-            Administrando <strong>{stats.total_clients} sitios web de clientes</strong> en servidor VPS Ubuntu. Vencimientos, períodos de gracia y suspensiones Nginx se aplican automáticamente.
+            Administrando <strong>{stats.total_clients} sitios web de clientes</strong> en servidor VPS Ubuntu. Vencimientos, períodos de gracia y suspensiones Caddy se aplican automáticamente.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -206,7 +206,7 @@ export default function DashboardPage({ summary, onAddClient, onNavigateClients,
               Próximos Vencimientos y Renovaciones de Clientes
             </h3>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-sub)' }}>
-              Avisos automáticos por correo SMTP antes de la suspensión en el Proxy VPS Nginx
+              Avisos automáticos por correo SMTP antes de la suspensión en el Proxy VPS Caddy
             </p>
           </div>
           <button className="btn btn-secondary" style={{ padding: '0.55rem 1.1rem', fontSize: '0.875rem' }} onClick={() => onNavigateClients('ALL')}>
@@ -226,7 +226,7 @@ export default function DashboardPage({ summary, onAddClient, onNavigateClients,
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justify: 'space-between',
+                  justifyContent: 'space-between',
                   padding: '1.25rem 1.65rem',
                   backgroundColor: '#ffffff',
                   borderRadius: 'var(--radius-lg)',
@@ -340,7 +340,7 @@ export default function DashboardPage({ summary, onAddClient, onNavigateClients,
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justify: 'space-between',
+                  justifyContent: 'space-between',
                   padding: '1.25rem 1.5rem',
                   backgroundColor: '#ffffff',
                   borderRadius: 'var(--radius-lg)',
@@ -360,7 +360,7 @@ export default function DashboardPage({ summary, onAddClient, onNavigateClients,
                     color: '#15803d',
                     display: 'flex',
                     alignItems: 'center',
-                    justify: 'center',
+                    justifyContent: 'center',
                     border: '1px solid #bbf7d0'
                   }}>
                     <ArrowUpRight size={20} />

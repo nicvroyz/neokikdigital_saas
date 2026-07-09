@@ -340,7 +340,7 @@ export default function SettingsPage() {
 
             <div style={{ padding: '1.15rem 1.35rem', backgroundColor: '#f8fafc', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontWeight: '800', fontSize: '0.95rem' }}>3. Suspensión Automática de Nginx</div>
+                <div style={{ fontWeight: '800', fontSize: '0.95rem' }}>3. Suspensión Automática de Caddy</div>
                 <div style={{ fontSize: '0.825rem', color: 'var(--text-sub)' }}>Al agotar los 5 días de gracia, cambia a SUSPENDED y activa el proxy 503.</div>
               </div>
               <span className="badge badge-active">ACTIVO</span>
@@ -358,12 +358,10 @@ export default function SettingsPage() {
 
           <div style={{ fontFamily: 'monospace', fontSize: '0.85rem', backgroundColor: '#0f172a', color: '#38bdf8', padding: '1.25rem', borderRadius: 'var(--radius-md)', height: '280px', overflowY: 'auto' }}>
             <div>[CRON AUDIT 00:00:00] Initialized subscription status check.</div>
-            <div>[CRON AUDIT] Papeles Concepción (ID: cli-1) Status: ACTIVE (Valid until 2026-07-18).</div>
-            <div>[CRON AUDIT] Rabbo Restaurant (ID: cli-2) Status: ACTIVE (Valid until 2026-08-01).</div>
-            <div>[CRON AUDIT] Boutique Imprenta (ID: cli-3) Expiration passed (2026-06-30). Grace period active.</div>
-            <div>[SMTP DISPATCH] Sent warning email to ventas@boutiqueimprenta.cl</div>
-            <div>[NGINX PROXY ENGINE] VirtualHosts verified in /etc/nginx/sites-available/</div>
-            <div>[OK] All services running synchronously.</div>
+            <div>[CRON AUDIT] Checking client database records...</div>
+            <div>[CRON AUDIT] Verification completed. No expired subscriptions detected.</div>
+            <div>[CADDY PROXY ENGINE] Configurations verified in /etc/caddy/conf.d/</div>
+            <div>[OK] All proxy and database services running synchronously.</div>
           </div>
         </div>
       )}

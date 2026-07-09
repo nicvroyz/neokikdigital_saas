@@ -1,131 +1,106 @@
-# Neokik Digital - Agency Operating SaaS Platform
+# Neokik Digital - Plataforma Operativa SaaS de la Agencia
 
-A simple, scalable, and profitable internal SaaS operating system designed for **Neokik Digital** to centralize client web hosting, maintenance subscriptions, recurring billing cycles, and automated Nginx VPS proxy enforcement.
-
----
-
-## 🚀 Key Features
-
-- **Monolithic & Low Complexity**: Node.js/Express + TypeScript backend API + React Vite SPA frontend in clean Light Mode.
-- **Automated Lifecycle Enforcement**:
-  - `ACTIVE`: Normal website operation via Nginx reverse proxy.
-  - `EXPIRED`: Grace period active (default 5 days), automatic email reminders dispatched.
-  - `SUSPENDED`: Grace period exceeded, Nginx automatically serves branded suspension splash page (`/var/www/neokik/suspended.html`).
-  - **Instant Reactivation**: Recording a payment automatically recalculates expiration dates, changes status to `ACTIVE`, and restores live site virtual host.
-- **VPS Native**: Direct Nginx configuration generation and reload without heavy container overhead.
-- **MRR Analytics**: Real-time stats on Monthly Recurring Revenue, active clients, upcoming expirations, and payment logs.
+Un sistema operativo SaaS interno, simple, escalable y rentable diseñado para **Neokik Digital** para centralizar el hosting de sitios web de clientes, suscripciones de mantenimiento, ciclos de facturación recurrentes y el aprovisionamiento/migración automatizada de contenedores bajo la arquitectura segura de **Caddy + Mailcow**.
 
 ---
 
-## 🛠 Tech Stack
+## 🚀 Características Clave
 
-- **Backend**: Node.js, Express, TypeScript, `pg` (PostgreSQL client), `node-cron`, `nodemailer`.
-- **Frontend**: React 18, Vite, Lucide Icons, Clean Light Mode CSS Design System.
-- **Database**: PostgreSQL 15.
-- **Infrastructure**: Nginx Reverse Proxy, Let's Encrypt SSL, Systemd / PM2 on Ubuntu VPS.
+- **Aislamiento Seguro en Producción**: 
+  - Si la base de datos PostgreSQL falla en el arranque en producción (`NODE_ENV=production`), la aplicación realiza un cierre controlado inmediato (`process.exit(1)`).
+  - Si la base de datos se cae durante el tiempo de ejecución, las peticiones fallan arrojando una excepción de conexión en lugar de usar en-memoria.
+- **Flujo de Suscripción Automatizado**:
+  - `ACTIVE`: Funcionamiento normal de los sitios web alojados en sus respectivos contenedores Docker de forma aislada, reverse-proxied por Caddy de manera automática.
+  - `EXPIRED`: Período de gracia activo (por defecto 5 días). Envío automático de notificaciones.
+  - `SUSPENDED`: Período de gracia superado. Caddy sirve automáticamente una página de suspensión del servicio (`/var/www/neokik/suspended.html`).
+- **Migración y Aprovisionamiento Inteligente**:
+  - Migración desatendida desde cPanel (Login -> Creación -> Subida -> Análisis de Viabilidad -> Creación de DB -> Creación de Contenedor -> Caddy SSL -> Mailcow Mailboxes & Maildir sync -> Health Check).
+  - Rollback transaccional ante fallos: Limpieza segura y validada de bases de datos, contenedores de Docker, directorios temporales y carpetas del host.
+  - Sincronización de correos Maildir nativa en contenedores via `docker cp` y regeneración de índices IMAP en Dovecot.
+- **Métricas de MRR**: Tablero con estadísticas de Ingresos Mensuales Recurrentes (MRR), clientes activos, próximos vencimientos y bitácora de pagos.
+- **Protección contra Vulnerabilidades**: Bloqueo de ataques Directory Traversal (Zip Slip) en la carga y extracción de respaldos.
+- **Limitación de Tasa (Rate Limiting)**: Control de tasa basado en ventanas deslizantes en memoria para proteger los endpoints críticos de autenticación y migraciones.
 
 ---
 
-## 📁 Project Structure
+## 🛠 Stack Tecnológico
+
+- **Backend**: Node.js, Express, TypeScript, `pg` (Cliente PostgreSQL), `node-cron`, `nodemailer`.
+- **Frontend**: React 18, Vite, Lucide Icons, Vanilla CSS Design System.
+- **Base de Datos**: PostgreSQL 15 (Host) + MySQL (contenedores de sitios).
+- **Servicios Externos**: Caddy (Reverse Proxy central con soporte auto-SSL Let's Encrypt), Mailcow Dockerized (Servidor de correos central), Docker (Entorno de contenedores para sitios de clientes).
+
+---
+
+## 📁 Estructura del Proyecto
 
 ```
 neokikdigital_saas/
 ├── backend/
 │   ├── src/
-│   │   ├── config/          # DB connection & Env vars
-│   │   ├── controllers/     # Auth, Client, Dashboard, Hosting handlers
+│   │   ├── config/          # Conexión DB, Validador de entorno y variables
+│   │   ├── controllers/     # Controladores (Auth, Client, Dashboard, Hosting, Infra)
 │   │   ├── db/              # schema.sql & seed.sql
-│   │   ├── middleware/      # JWT authentication middleware
-│   │   ├── routes/          # Express API router definitions
-│   │   ├── services/        # Client logic, Hosting/Nginx sync, Cron auditor, Mailer
-│   │   └── server.ts        # Express entry point
-│   ├── scripts/             # initDb.js runner
+│   │   ├── middleware/      # Middlewares (Auth JWT, Rate Limiting, Multer)
+│   │   ├── routes/          # Enrutadores API (Express)
+│   │   └── services/        # Lógica de negocio (Client, Database, Docker, Mailcow, Migration, etc.)
+│   ├── scripts/             # Scripts (initDb.js, qa_test.ts)
 │   └── package.json
 ├── frontend/
 │   ├── src/
-│   │   ├── components/      # Sidebar, ClientTable, ClientModal, RenewModal, StatsCard
-│   │   ├── pages/           # DashboardPage, ClientsPage, SettingsPage, LoginPage
-│   │   ├── styles/          # index.css (Neokik Light Mode tokens)
-│   │   ├── App.jsx          # Main application router & state manager
+│   │   ├── components/      # Componentes UI (Sidebar, Wizards de Migración/Aprovisionamiento, etc.)
+│   │   ├── pages/           # Vistas (Dashboard, ClientsPage, HostingPage, LoginPage)
+│   │   ├── App.jsx          # Ruteador principal y estado global
 │   │   └── main.jsx
 │   └── vite.config.js
 ├── infra/
-│   ├── nginx/               # Active & Suspended virtualhost templates & HTML splash page
-│   ├── systemd/             # neokik-backend.service unit
-│   └── setup-vps.sh         # Automated Ubuntu VPS setup script
+│   └── setup-vps.sh         # Script inicial de aprovisionamiento de VPS Ubuntu
 └── docker-compose.yml
 ```
 
 ---
 
-## 🗄 PostgreSQL Database Schema
+## 💻 Desarrollo Local
 
-```sql
--- Client Table snippet
-CREATE TABLE clients (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(150) NOT NULL,
-    company_name VARCHAR(150),
-    email VARCHAR(255) NOT NULL,
-    domain VARCHAR(255) UNIQUE NOT NULL,
-    service_type service_type NOT NULL DEFAULT 'HOSTING_AND_MAINTENANCE',
-    plan_interval plan_interval NOT NULL DEFAULT 'MONTHLY',
-    amount_per_period DECIMAL(10, 2) NOT NULL DEFAULT 49.99,
-    status client_status NOT NULL DEFAULT 'ACTIVE',
-    last_payment_date DATE NOT NULL,
-    expiration_date DATE NOT NULL,
-    grace_period_days INT NOT NULL DEFAULT 5,
-    doc_root VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-```
-
----
-
-## 💻 Local Development Setup
-
-### 1. Database Setup
-Ensure PostgreSQL is running locally, then initialize the schema:
+### 1. Inicializar Base de Datos
+Asegúrate de tener PostgreSQL ejecutándose localmente, luego corre el script:
 ```bash
 cd backend
 npm install
-# Configure backend/.env with your Postgres credentials
+# Configura el archivo backend/.env con las variables necesarias
 npm run db:init
 npm run dev
 ```
 
-### 2. Frontend Setup
-In a new terminal window:
+### 2. Levantar Frontend
+En otra pestaña de la terminal:
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-**Default Credentials:**
-- Email: `admin@neokikdigital.com`
-- Password: `admin123`
+Abre tu navegador en [http://localhost:3000](http://localhost:3000).
+
+**Credenciales por defecto:**
+- **Email**: `admin@neokikdigital.com`
+- **Password**: `admin123`
 
 ---
 
-## 🌐 Ubuntu VPS Deployment Guide
+## 🌐 Guías y Documentación de Producción
 
-1. Clone or upload this repository to your Ubuntu VPS at `/opt/neokikdigital_saas`.
-2. Run the automated setup script:
-   ```bash
-   cd /opt/neokikdigital_saas/infra
-   chmod +x setup-vps.sh
-   ./setup-vps.sh
-   ```
-3. Issue SSL Certificate via Let's Encrypt:
-   ```bash
-   sudo certbot --nginx -d control.neokik.com
-   ```
+Toda la documentación técnica de producción se encuentra disponible en la carpeta `docs/`:
+
+1. **[Guía de Despliegue VPS (DEPLOY.md)](file:///c:/Users/jacvr/OneDrive/Desktop/neokikdigital_saas/docs/DEPLOY.md)**: Instalación y configuración paso a paso de Node.js, PostgreSQL, Caddy, Mailcow, Docker, PM2 y cortafuegos.
+2. **[Playbook de Recuperación ante Desastres (DISASTER_RECOVERY.md)](file:///c:/Users/jacvr/OneDrive/Desktop/neokikdigital_saas/docs/DISASTER_RECOVERY.md)**: Políticas de respaldos recurrentes de base de datos, procedimientos de recuperación paso a paso y checklists de monitoreo.
+3. **[Política de Recuperación de Migraciones (RESUME_VS_ROLLBACK.md)](file:///c:/Users/jacvr/OneDrive/Desktop/neokikdigital_saas/docs/RESUME_VS_ROLLBACK.md)**: Detalle del comportamiento de recuperación transaccional y rollback automático implementado ante caídas del servidor o interrupciones.
 
 ---
 
-## 📈 Future Scaling Roadmap
+## 🧪 Ejecución de Auditoría de QA y Pruebas E2E
 
-1. **Self-Service Client Portal**: Allow clients to log in, view invoices, and pay directly via Stripe Webhooks.
-2. **Automated DNS & SSL Provisioning**: Automatic Let's Encrypt SSL generation upon adding a new domain via Certbot CLI hooks.
-3. **Multi-VPS Nodes**: Support expanding web hosting across multiple Ubuntu VPS instances managed by a single central Neokik API.
+Para ejecutar la suite completa de 21 comprobaciones del sistema (validador de entorno, Zip Slip, límite de tasa, health check, fallos MySQL con rollback, archivos corruptos y crash recovery de servidor):
+```bash
+cd backend
+npm run test:qa
+```

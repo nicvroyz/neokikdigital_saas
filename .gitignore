@@ -1,0 +1,37 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+web_modules/
+
+# Production builds
+dist/
+build/
+.svelte-kit/
+.next/
+out/
+
+# Local env files / secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# Uploads / temporary files
+uploads/
+whatsapp_session/
+temp/
+tmp/
+*.log
+
+# Editor / System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Agent / Scratch files
+.agents/
+.gemini/
+scratch/

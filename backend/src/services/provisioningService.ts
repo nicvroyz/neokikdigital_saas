@@ -22,11 +22,10 @@ export const provisioningService = {
   async createProvision(data: { clientId: string; domain: string; projectType: string; manageHosting: boolean; manageEmail: boolean; emailAccounts?: string[] }) {
     log(`Registrando nuevo aprovisionamiento para: ${data.domain}`);
     
-    const id = `prov-${Date.now()}`;
     const res = await query(
-      `INSERT INTO provisions (id, client_id, domain, project_type, manage_hosting, manage_email, email_accounts, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING') RETURNING *`,
-      [id, data.clientId || null, data.domain, data.projectType, data.manageHosting, data.manageEmail, JSON.stringify(data.emailAccounts || [])]
+      `INSERT INTO provisions (client_id, domain, project_type, manage_hosting, manage_email, email_accounts, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'PENDING') RETURNING *`,
+      [data.clientId || null, data.domain, data.projectType, data.manageHosting, data.manageEmail, JSON.stringify(data.emailAccounts || [])]
     );
 
     return res.rows[0];

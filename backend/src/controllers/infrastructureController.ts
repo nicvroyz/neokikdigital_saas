@@ -10,6 +10,7 @@ import { execSync } from 'child_process';
 import { monitoringService } from '../services/monitoringService';
 import http from 'http';
 import fs from 'fs';
+import { randomUUID } from 'crypto';
 
 async function checkDockerServiceStatus(containerName: string): Promise<string> {
   const isDryRun = !!config.caddy.dryRun || !fs.existsSync('/var/run/docker.sock');
@@ -81,11 +82,10 @@ export const infrastructureController = {
       if (!domain || !project_type) {
         return res.status(400).json({ error: 'Campos requeridos: domain, project_type' });
       }
-      const id = `prov-${Date.now()}`;
       const result = await query(
-        `INSERT INTO provisions (id, client_id, domain, project_type, manage_hosting, manage_email, email_accounts, status, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8) RETURNING *`,
-        [id, client_id || null, domain, project_type, manage_hosting ?? true, manage_email ?? false, JSON.stringify(email_accounts || []), new Date().toISOString()]
+        `INSERT INTO provisions (client_id, domain, project_type, manage_hosting, manage_email, email_accounts, status, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7) RETURNING *`,
+        [client_id || null, domain, project_type, manage_hosting ?? true, manage_email ?? false, JSON.stringify(email_accounts || []), new Date().toISOString()]
       );
       return res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -147,15 +147,14 @@ export const infrastructureController = {
 
       const migrations: any[] = [];
       for (const file of files) {
-        const id = `mig-${Date.now()}-${Math.round(Math.random() * 1000)}`;
         const backupType = file.originalname.toLowerCase().endsWith('.sql') ? 'DATABASE_SQL'
           : file.originalname.toLowerCase().endsWith('.zip') ? 'WEBSITE_ZIP'
           : 'CPANEL_FULL';
 
         const result = await query(
-          `INSERT INTO migrations (id, domain, backup_type, backup_path, backup_size_bytes, status, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7) RETURNING *`,
-          [id, req.body.domain || null, backupType, file.path, file.size, new Date().toISOString(), new Date().toISOString()]
+          `INSERT INTO migrations (domain, backup_type, backup_path, backup_size_bytes, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, 'PENDING', $5, $6) RETURNING *`,
+          [req.body.domain || null, backupType, file.path, file.size, new Date().toISOString(), new Date().toISOString()]
         );
         migrations.push(result.rows[0]);
       }
@@ -212,8 +211,8 @@ export const infrastructureController = {
       );
 
       await query(
-        `INSERT INTO migration_logs (id, migration_id, step, message, status, started_at, completed_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [`mlog-${Date.now()}`, id, 'simulate_migration', `Simulación de viabilidad completada con score de ${plan.score}%.`, 'SUCCESS', new Date().toISOString(), new Date().toISOString()]
+        `INSERT INTO migration_logs (migration_id, step, message, status, started_at, completed_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [id, 'simulate_migration', `Simulación de viabilidad completada con score de ${plan.score}%.`, 'SUCCESS', new Date().toISOString(), new Date().toISOString()]
       );
 
       return res.json({ message: 'Simulación completada', migration: result.rows[0], report: plan });
@@ -310,8 +309,8 @@ export const infrastructureController = {
       );
 
       await query(
-        `INSERT INTO migration_logs (id, migration_id, step, message, status, started_at, completed_at) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [`mlog-${Date.now()}`, id, 'rollback', 'Rollback ejecutado exitosamente', 'SUCCESS', new Date().toISOString(), new Date().toISOString()]
+        `INSERT INTO migration_logs (migration_id, step, message, status, started_at, completed_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [id, 'rollback', 'Rollback ejecutado exitosamente', 'SUCCESS', new Date().toISOString(), new Date().toISOString()]
       );
 
       return res.json({ message: 'Rollback ejecutado exitosamente', migration: result.rows[0] });
@@ -630,18 +629,18 @@ export const infrastructureController = {
         return res.status(404).json({ error: 'Cliente no encontrado' });
       }
 
-      const backupId = `bkp-${Date.now()}`;
+      const fileUUID = randomUUID();
       const filename = `backup-${client.rows[0].domain}-db-${new Date().toISOString().split('T')[0]}.sql.gz`;
 
-      await query(
-        `INSERT INTO backups (id, client_id, filename, file_path, file_size, backup_type, version, notes, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [backupId, id, filename, `/uploads/backups/${backupId}.sql.gz`, 52428800, 'DATABASE_SQL', 1, 'Respaldo manual de base de datos', new Date().toISOString()]
+      const result = await query(
+        `INSERT INTO backups (client_id, filename, file_path, file_size, backup_type, version, notes, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [id, filename, `/uploads/backups/${fileUUID}.sql.gz`, 52428800, 'DATABASE_SQL', 1, 'Respaldo manual de base de datos', new Date().toISOString()]
       );
 
       return res.json({
         message: `Respaldo de base de datos creado para ${client.rows[0].domain}`,
-        backup_id: backupId,
+        backup_id: result.rows[0].id,
         filename,
       });
     } catch (err) {

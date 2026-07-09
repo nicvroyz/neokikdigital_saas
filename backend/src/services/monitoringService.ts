@@ -78,11 +78,10 @@ export const monitoringService = {
       }
     }
 
-    const metricId = randomUUID();
     const result = await query(
-      `INSERT INTO server_health_metrics (id, cpu_usage, ram_total_gb, ram_used_gb, disk_total_gb, disk_used_gb, docker_status, mailcow_status, redis_status, postgres_status, response_time_ms)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-      [metricId, cpuUsage, ramTotal, ramUsed, diskTotal, diskUsed, dockerStatus, mailcowStatus, redisStatus, postgresStatus, responseTimeMs]
+      `INSERT INTO server_health_metrics (cpu_usage, ram_total_gb, ram_used_gb, disk_total_gb, disk_used_gb, docker_status, mailcow_status, redis_status, postgres_status, response_time_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [cpuUsage, ramTotal, ramUsed, diskTotal, diskUsed, dockerStatus, mailcowStatus, redisStatus, postgresStatus, responseTimeMs]
     );
 
     const metrics = result.rows[0];

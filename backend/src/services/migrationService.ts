@@ -17,6 +17,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { AsyncLocalStorage } from 'async_hooks';
+import { randomUUID } from 'crypto';
 
 export const correlationStorage = new AsyncLocalStorage<string>();
 
@@ -66,16 +67,16 @@ export const migrationService = {
 
     // Insert log
     await query(
-      `INSERT INTO migration_logs (id, migration_id, step, message, status, percentage, started_at, completed_at)
-       VALUES ($1, $2, 'analyze_backup', 'Análisis del respaldo completado con éxito.', 'SUCCESS', 15, $3, $4)`,
-      [`mlog-${Date.now()}`, migrationId, new Date().toISOString(), new Date().toISOString()]
+      `INSERT INTO migration_logs (migration_id, step, message, status, percentage, started_at, completed_at)
+       VALUES ($1, 'analyze_backup', 'Análisis del respaldo completado con éxito.', 'SUCCESS', 15, $2, $3)`,
+      [migrationId, new Date().toISOString(), new Date().toISOString()]
     );
 
     return report;
   },
 
   async executeMigration(migrationId: string) {
-    const correlationId = `corr-${Math.random().toString(36).substring(2, 10)}`;
+    const correlationId = randomUUID();
     return correlationStorage.run(correlationId, async () => {
       log(`Iniciando proceso transaccional de migración: ${migrationId}`);
       
@@ -463,8 +464,6 @@ export const migrationService = {
   },
 
   async logStep(migrationId: string, step: string, message: string, status: 'SUCCESS' | 'FAILED' | 'RUNNING', percentage: number) {
-    const logId = `mlog-${Date.now()}-${Math.round(Math.random() * 1000)}`;
-    
     // Check if the step log already exists to update it or create new
     const existing = await query('SELECT * FROM migration_logs WHERE migration_id = $1 AND step = $2', [migrationId, step]);
     
@@ -477,9 +476,9 @@ export const migrationService = {
       );
     } else {
       await query(
-        `INSERT INTO migration_logs (id, migration_id, step, message, status, percentage, started_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [logId, migrationId, step, message, status, percentage, new Date().toISOString()]
+        `INSERT INTO migration_logs (migration_id, step, message, status, percentage, started_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [migrationId, step, message, status, percentage, new Date().toISOString()]
       );
     }
     

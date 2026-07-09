@@ -1,6 +1,7 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 
 const uploadsDir = path.join(__dirname, '../../uploads/migrations');
 
@@ -14,7 +15,7 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const uniqueSuffix = crypto.randomUUID();
     cb(null, uniqueSuffix + '-' + file.originalname);
   },
 });

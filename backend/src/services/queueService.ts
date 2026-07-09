@@ -25,11 +25,10 @@ export const queueService = {
     const existing = await query('SELECT * FROM job_queue WHERE reference_id = $1 AND status = \'PENDING\'', [referenceId]);
     if (existing.rows.length > 0) return existing.rows[0];
 
-    const jobId = `job-${Date.now()}-${Math.round(Math.random() * 1000)}`;
     const res = await query(
-      `INSERT INTO job_queue (id, job_type, reference_id, status, payload, attempts, max_attempts)
-       VALUES ($1, $2, $3, 'PENDING', $4, 0, 3) RETURNING *`,
-      [jobId, jobType, referenceId, JSON.stringify(payload)]
+      `INSERT INTO job_queue (job_type, reference_id, status, payload, attempts, max_attempts)
+       VALUES ($1, $2, 'PENDING', $3, 0, 3) RETURNING *`,
+      [jobType, referenceId, JSON.stringify(payload)]
     );
 
     return res.rows[0];

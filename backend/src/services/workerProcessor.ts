@@ -14,10 +14,9 @@ function log(msg: string) {
 async function insertAuditLog(action: string, entity: string, clientId: string | null, metadata: any, status: 'SUCCESS' | 'FAILED' | 'WARNING') {
   try {
     await query(
-      `INSERT INTO audit_logs (id, user_id, client_id, action, entity, old_value, new_value, metadata, status, ip)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO audit_logs (user_id, client_id, action, entity, old_value, new_value, metadata, status, ip)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
-        `audit-${Date.now()}-${Math.round(Math.random() * 1000)}`,
         null, // user_id (null for automated background processor actions)
         clientId,
         action,

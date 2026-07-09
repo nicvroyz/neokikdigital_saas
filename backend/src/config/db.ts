@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { config } from './env';
+import { randomUUID } from 'crypto';
 
 export const pool = new Pool({
   host: config.db.host,
@@ -119,12 +120,14 @@ export const query = async (text: string, params?: any[]) => {
   }
 
   if (trimmed.startsWith('INSERT INTO campaigns')) {
+    const hasExplicitId = trimmed.includes('(id,') || trimmed.includes('(id ');
+    const offset = hasExplicitId ? 1 : 0;
     const newCamp: any = {
-      id: `camp-${Date.now()}`,
-      title: params?.[0],
-      message: params?.[1],
-      channel: params?.[2] || 'BOTH',
-      target_audience: params?.[3] || 'ALL_CLIENTS',
+      id: hasExplicitId ? params?.[0] : randomUUID(),
+      title: params?.[0 + offset],
+      message: params?.[1 + offset],
+      channel: params?.[2 + offset] || 'BOTH',
+      target_audience: params?.[3 + offset] || 'ALL_CLIENTS',
       status: 'DRAFT',
       created_at: new Date()
     };
@@ -133,12 +136,14 @@ export const query = async (text: string, params?: any[]) => {
   }
 
   if (trimmed.startsWith('INSERT INTO campaign_recipients')) {
+    const hasExplicitId = trimmed.includes('(id,') || trimmed.includes('(id ');
+    const offset = hasExplicitId ? 1 : 0;
     const newRec: any = {
-      id: `rec-${Date.now()}`,
-      campaign_id: params?.[0],
-      client_id: params?.[1],
-      channel: params?.[2],
-      status: params?.[3] || 'PENDING',
+      id: hasExplicitId ? params?.[0] : randomUUID(),
+      campaign_id: params?.[0 + offset],
+      client_id: params?.[1 + offset],
+      channel: params?.[2 + offset],
+      status: params?.[3 + offset] || 'PENDING',
       sent_at: new Date()
     };
     mockMemoryStore.recipients.unshift(newRec);
@@ -225,24 +230,26 @@ export const query = async (text: string, params?: any[]) => {
   }
 
   if (trimmed.startsWith('INSERT INTO clients')) {
+    const hasExplicitId = trimmed.includes('(id,') || trimmed.includes('(id ');
+    const offset = hasExplicitId ? 1 : 0;
     const newClient: any = {
-      id: `cli-${Date.now()}`,
-      name: params?.[0],
-      company_name: params?.[1],
-      email: params?.[2],
-      phone: params?.[3],
-      domain: params?.[4],
-      subdomain: params?.[5],
-      service_type: params?.[6],
-      plan_interval: params?.[7],
-      amount_per_period: params?.[8],
-      currency: params?.[9] || 'CLP',
-      status: params?.[10] || 'ACTIVE',
-      last_payment_date: params?.[11],
-      expiration_date: params?.[12],
-      grace_period_days: params?.[13] || 5,
-      doc_root: params?.[14],
-      notes: params?.[15],
+      id: hasExplicitId ? params?.[0] : randomUUID(),
+      name: params?.[0 + offset],
+      company_name: params?.[1 + offset],
+      email: params?.[2 + offset],
+      phone: params?.[3 + offset],
+      domain: params?.[4 + offset],
+      subdomain: params?.[5 + offset],
+      service_type: params?.[6 + offset],
+      plan_interval: params?.[7 + offset],
+      amount_per_period: params?.[8 + offset],
+      currency: params?.[9 + offset] || 'CLP',
+      status: params?.[10 + offset] || 'ACTIVE',
+      last_payment_date: params?.[11 + offset],
+      expiration_date: params?.[12 + offset],
+      grace_period_days: params?.[13 + offset] || 5,
+      doc_root: params?.[14 + offset],
+      notes: params?.[15 + offset],
       created_at: new Date()
     };
     mockMemoryStore.clients.unshift(newClient);
@@ -264,16 +271,18 @@ export const query = async (text: string, params?: any[]) => {
   }
 
   if (trimmed.startsWith('INSERT INTO payment_records')) {
+    const hasExplicitId = trimmed.includes('(id,') || trimmed.includes('(id ');
+    const offset = hasExplicitId ? 1 : 0;
     const pmt: any = {
-      id: `pmt-${Date.now()}`,
-      client_id: params?.[0],
-      amount: params?.[1],
-      currency: params?.[2],
+      id: hasExplicitId ? params?.[0] : randomUUID(),
+      client_id: params?.[0 + offset],
+      amount: params?.[1 + offset],
+      currency: params?.[2 + offset],
       paid_at: new Date(),
-      period_start: params?.[3],
-      period_end: params?.[4],
-      payment_method: params?.[5],
-      notes: params?.[6]
+      period_start: params?.[3 + offset],
+      period_end: params?.[4 + offset],
+      payment_method: params?.[5 + offset],
+      notes: params?.[6 + offset]
     };
     mockMemoryStore.payments.unshift(pmt);
     return { rows: [pmt] };
@@ -335,63 +344,71 @@ export const query = async (text: string, params?: any[]) => {
   }
 
   if (trimmed.startsWith('INSERT INTO migrations')) {
+    const hasExplicitId = trimmed.includes('(id,') || trimmed.includes('(id ');
+    const offset = hasExplicitId ? 1 : 0;
     const newMig: any = {
-      id: params?.[0],
-      domain: params?.[1],
-      backup_type: params?.[2],
-      backup_path: params?.[3],
-      backup_size_bytes: params?.[4],
-      status: params?.[5] || 'PENDING',
-      created_at: params?.[6],
-      updated_at: params?.[7],
+      id: hasExplicitId ? params?.[0] : randomUUID(),
+      domain: params?.[0 + offset],
+      backup_type: params?.[1 + offset],
+      backup_path: params?.[2 + offset],
+      backup_size_bytes: params?.[3 + offset],
+      status: params?.[4 + offset] || 'PENDING',
+      created_at: params?.[5 + offset] || new Date().toISOString(),
+      updated_at: params?.[6 + offset] || new Date().toISOString(),
     };
     mockMemoryStore.migrations.unshift(newMig);
     return { rows: [newMig] };
   }
 
   if (trimmed.startsWith('INSERT INTO migration_logs')) {
-    const isShortQuery = params && params.length < 5;
+    const hasExplicitId = trimmed.includes('(id,') || trimmed.includes('(id ');
+    const offset = hasExplicitId ? 1 : 0;
+    const isShortQuery = (params ? params.length - offset : 0) < 5;
     const newLog: any = {
-      id: params?.[0],
-      migration_id: params?.[1],
-      step: isShortQuery ? 'analyze_backup' : params?.[2],
-      message: isShortQuery ? 'Análisis del respaldo completado con éxito.' : params?.[3],
-      status: isShortQuery ? 'SUCCESS' : (params?.[4] || 'RUNNING'),
-      percentage: isShortQuery ? 15 : (params?.[5] || 0),
-      started_at: isShortQuery ? params?.[2] : (params?.[6] || new Date().toISOString()),
-      completed_at: isShortQuery ? params?.[3] : null,
+      id: hasExplicitId ? params?.[0] : randomUUID(),
+      migration_id: params?.[0 + offset],
+      step: isShortQuery ? 'analyze_backup' : params?.[1 + offset],
+      message: isShortQuery ? 'Análisis del respaldo completado con éxito.' : params?.[2 + offset],
+      status: isShortQuery ? 'SUCCESS' : (params?.[3 + offset] || 'RUNNING'),
+      percentage: isShortQuery ? 15 : (params?.[4 + offset] || 0),
+      started_at: isShortQuery ? (params?.[1 + offset] || new Date().toISOString()) : (params?.[5 + offset] || new Date().toISOString()),
+      completed_at: isShortQuery ? params?.[2 + offset] : null,
     };
     mockMemoryStore.migration_logs.push(newLog);
     return { rows: [newLog] };
   }
 
   if (trimmed.startsWith('INSERT INTO backups')) {
+    const hasExplicitId = trimmed.includes('(id,') || trimmed.includes('(id ');
+    const offset = hasExplicitId ? 1 : 0;
     const newBkp: any = {
-      id: params?.[0],
-      client_id: params?.[1],
-      filename: params?.[2],
-      file_path: params?.[3],
-      file_size: params?.[4],
-      backup_type: params?.[5],
-      version: params?.[6] || 1,
-      notes: params?.[7] || '',
-      created_at: params?.[8],
+      id: hasExplicitId ? params?.[0] : randomUUID(),
+      client_id: params?.[0 + offset],
+      filename: params?.[1 + offset],
+      file_path: params?.[2 + offset],
+      file_size: params?.[3 + offset],
+      backup_type: params?.[4 + offset],
+      version: params?.[5 + offset] || 1,
+      notes: params?.[6 + offset] || '',
+      created_at: params?.[7 + offset] || new Date().toISOString(),
     };
     mockMemoryStore.backups.unshift(newBkp);
     return { rows: [newBkp] };
   }
 
   if (trimmed.startsWith('INSERT INTO provisions')) {
+    const hasExplicitId = trimmed.includes('(id,') || trimmed.includes('(id ');
+    const offset = hasExplicitId ? 1 : 0;
     const newProv: any = {
-      id: params?.[0],
-      client_id: params?.[1],
-      domain: params?.[2],
-      project_type: params?.[3],
-      manage_hosting: params?.[4],
-      manage_email: params?.[5],
-      email_accounts: typeof params?.[6] === 'string' ? JSON.parse(params?.[6]) : params?.[6],
-      status: 'PENDING',
-      created_at: params?.[7],
+      id: hasExplicitId ? params?.[0] : randomUUID(),
+      client_id: params?.[0 + offset],
+      domain: params?.[1 + offset],
+      project_type: params?.[2 + offset],
+      manage_hosting: params?.[3 + offset],
+      manage_email: params?.[4 + offset],
+      email_accounts: typeof params?.[5 + offset] === 'string' ? JSON.parse(params?.[5 + offset]) : params?.[5 + offset],
+      status: params?.[6 + offset] || 'PENDING',
+      created_at: params?.[7 + offset] || new Date().toISOString(),
     };
     mockMemoryStore.provisions.unshift(newProv);
     return { rows: [newProv] };
@@ -521,7 +538,8 @@ export const query = async (text: string, params?: any[]) => {
   }
 
   if (trimmed.startsWith('INSERT INTO job_queue')) {
-    const hasStatusParam = params && params.length >= 5;
+    const hasExplicitId = trimmed.includes('(id,') || trimmed.includes('(id ');
+    const offset = hasExplicitId ? 1 : 0;
     
     const parseField = (val: any) => {
       if (typeof val !== 'string') return val;
@@ -532,12 +550,9 @@ export const query = async (text: string, params?: any[]) => {
       }
     };
 
-    // Check for literals in query text (support E2E crash recovery test)
     let status = 'PENDING';
     if (trimmed.includes("'PROCESSING'")) {
       status = 'PROCESSING';
-    } else if (hasStatusParam) {
-      status = params?.[3];
     }
 
     let attempts = 0;
@@ -546,11 +561,11 @@ export const query = async (text: string, params?: any[]) => {
     }
 
     const newJob: any = {
-      id: params?.[0] || `job-${Date.now()}`,
-      job_type: trimmed.includes("'MIGRATION'") ? 'MIGRATION' : (params?.[1] || 'MIGRATION'),
-      reference_id: trimmed.includes("'MIGRATION'") ? params?.[1] : (params?.[2] || params?.[1]),
+      id: hasExplicitId ? params?.[0] : randomUUID(),
+      job_type: params?.[0 + offset] || 'MIGRATION',
+      reference_id: params?.[1 + offset],
       status: status,
-      payload: hasStatusParam ? parseField(params?.[4]) : parseField(params?.[3] || '{}'),
+      payload: parseField(params?.[2 + offset] || '{}'),
       attempts: attempts,
       max_attempts: 3,
       error_message: null,
@@ -594,7 +609,7 @@ export const query = async (text: string, params?: any[]) => {
     };
 
     const newLog = {
-      id: hasExplicitId ? params?.[0] : `audit-${Date.now()}-${Math.round(Math.random() * 1000)}`,
+      id: hasExplicitId ? params?.[0] : randomUUID(),
       user_id: params?.[0 + offset],
       client_id: params?.[1 + offset],
       action: params?.[2 + offset],
@@ -615,18 +630,20 @@ export const query = async (text: string, params?: any[]) => {
   }
 
   if (trimmed.startsWith('INSERT INTO server_health_metrics')) {
+    const hasExplicitId = trimmed.includes('(id,') || trimmed.includes('(id ');
+    const offset = hasExplicitId ? 1 : 0;
     const newMetric = {
-      id: params?.[0] || `metric-${Date.now()}`,
-      cpu_usage: params?.[1],
-      ram_total_gb: params?.[2],
-      ram_used_gb: params?.[3],
-      disk_total_gb: params?.[4],
-      disk_used_gb: params?.[5],
-      docker_status: params?.[6],
-      mailcow_status: params?.[7],
-      redis_status: params?.[8],
-      postgres_status: params?.[9],
-      response_time_ms: params?.[10],
+      id: hasExplicitId ? params?.[0] : randomUUID(),
+      cpu_usage: params?.[0 + offset],
+      ram_total_gb: params?.[1 + offset],
+      ram_used_gb: params?.[2 + offset],
+      disk_total_gb: params?.[3 + offset],
+      disk_used_gb: params?.[4 + offset],
+      docker_status: params?.[5 + offset],
+      mailcow_status: params?.[6 + offset],
+      redis_status: params?.[7 + offset],
+      postgres_status: params?.[8 + offset],
+      response_time_ms: params?.[9 + offset],
       created_at: new Date().toISOString(),
     };
     mockMemoryStore.server_health_metrics.push(newMetric);

@@ -128,12 +128,12 @@ const mockMailboxes: Record<string, any[]> = {
       last_smtp_login: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
     },
   ],
-  'papelesconcepcion.cl': [
+  'ejemplo.cl': [
     {
-      username: 'contacto@papelesconcepcion.cl',
-      name: 'Contacto Papeles',
+      username: 'contacto@ejemplo.cl',
+      name: 'Contacto Ejemplo',
       active: 1,
-      domain: 'papelesconcepcion.cl',
+      domain: 'ejemplo.cl',
       local_part: 'contacto',
       quota: 524288000,
       quota_used: 89128960,
@@ -142,10 +142,10 @@ const mockMailboxes: Record<string, any[]> = {
       last_smtp_login: new Date(Date.now() - 6 * 3600 * 1000).toISOString(),
     },
     {
-      username: 'ventas@papelesconcepcion.cl',
-      name: 'Ventas Papeles',
+      username: 'ventas@ejemplo.cl',
+      name: 'Ventas Ejemplo',
       active: 1,
-      domain: 'papelesconcepcion.cl',
+      domain: 'ejemplo.cl',
       local_part: 'ventas',
       quota: 524288000,
       quota_used: 156237824,
@@ -154,10 +154,10 @@ const mockMailboxes: Record<string, any[]> = {
       last_smtp_login: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
     },
     {
-      username: 'gerencia@papelesconcepcion.cl',
-      name: 'Gerencia Papeles',
+      username: 'gerencia@ejemplo.cl',
+      name: 'Gerencia Ejemplo',
       active: 1,
-      domain: 'papelesconcepcion.cl',
+      domain: 'ejemplo.cl',
       local_part: 'gerencia',
       quota: 1073741824,
       quota_used: 267386880,
@@ -168,7 +168,7 @@ const mockMailboxes: Record<string, any[]> = {
   ],
 };
 
-const mockDomains = ['jacvroyz.cl', 'papelesconcepcion.cl'];
+const mockDomains = ['jacvroyz.cl', 'ejemplo.cl'];
 
 // ─── Service ─────────────────────────────────────────────────────────────────
 

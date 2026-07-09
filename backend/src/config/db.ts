@@ -63,152 +63,18 @@ const mockMemoryStore: MockStore = {
       name: 'Neokik Admin'
     }
   ],
-  clients: [
-    {
-      id: 'cli-1',
-      name: 'Papeles Concepción',
-      company_name: 'Papeles Concepción SpA',
-      email: 'contacto@papelesconcepcion.cl',
-      phone: '+56 9 1234 5678',
-      domain: 'papelesconcepcion.cl',
-      service_type: 'HOSTING_AND_MAINTENANCE',
-      plan_interval: 'MONTHLY',
-      amount_per_period: 89000,
-      currency: 'CLP',
-      status: 'ACTIVE',
-      last_payment_date: new Date(Date.now() - 15 * 24 * 3600 * 1000).toISOString().split('T')[0],
-      expiration_date: new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString().split('T')[0],
-      grace_period_days: 5,
-      doc_root: '/var/www/neokik/papelesconcepcion',
-      created_at: new Date()
-    },
-    {
-      id: 'cli-2',
-      name: 'Rabbo Restaurant',
-      company_name: 'Rabbo Gastronomía',
-      email: 'info@rabborestaurant.cl',
-      phone: '+56 9 8765 4321',
-      domain: 'rabborestaurant.cl',
-      service_type: 'WEB_HOSTING',
-      plan_interval: 'QUARTERLY',
-      amount_per_period: 199000,
-      currency: 'CLP',
-      status: 'ACTIVE',
-      last_payment_date: new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString().split('T')[0],
-      expiration_date: new Date(Date.now() + 28 * 24 * 3600 * 1000).toISOString().split('T')[0],
-      grace_period_days: 5,
-      doc_root: '/var/www/neokik/rabborestaurant',
-      created_at: new Date()
-    },
-    {
-      id: 'cli-3',
-      name: 'Boutique Imprenta',
-      company_name: 'Imprenta Creativa',
-      email: 'ventas@boutiqueimprenta.cl',
-      phone: '+56 9 5555 4444',
-      domain: 'boutiqueimprenta.cl',
-      service_type: 'MAINTENANCE',
-      plan_interval: 'MONTHLY',
-      amount_per_period: 49000,
-      currency: 'CLP',
-      status: 'EXPIRED',
-      last_payment_date: new Date(Date.now() - 32 * 24 * 3600 * 1000).toISOString().split('T')[0],
-      expiration_date: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString().split('T')[0],
-      grace_period_days: 5,
-      doc_root: '/var/www/neokik/boutiqueimprenta',
-      created_at: new Date()
-    }
-  ],
-  campaigns: [
-    {
-      id: 'camp-1',
-      title: 'Aviso de Mantenimiento Servidor VPS',
-      message: 'Estimado cliente, realizaremos una actualización del servidor este domingo a las 02:00 AM. Su sitio no experimentará caídas.',
-      channel: 'BOTH',
-      target_audience: 'ALL_CLIENTS',
-      status: 'SENT',
-      created_at: new Date(Date.now() - 5 * 24 * 3600 * 1000),
-      sent_at: new Date(Date.now() - 5 * 24 * 3600 * 1000)
-    }
-  ],
-  recipients: [
-    {
-      id: 'rec-1',
-      campaign_id: 'camp-1',
-      client_id: 'cli-1',
-      client_name: 'Papeles Concepción',
-      email: 'contacto@papelesconcepcion.cl',
-      phone: '+56 9 1234 5678',
-      channel: 'EMAIL',
-      status: 'SENT',
-      sent_at: new Date(Date.now() - 5 * 24 * 3600 * 1000)
-    },
-    {
-      id: 'rec-2',
-      campaign_id: 'camp-1',
-      client_id: 'cli-1',
-      client_name: 'Papeles Concepción',
-      email: 'contacto@papelesconcepcion.cl',
-      phone: '+56 9 1234 5678',
-      channel: 'WHATSAPP',
-      status: 'SENT',
-      sent_at: new Date(Date.now() - 5 * 24 * 3600 * 1000)
-    }
-  ],
+  clients: [],
+  campaigns: [],
+  recipients: [],
   projects: [],
   tasks: [],
   work_logs: [],
-  payments: [
-    {
-      id: 'pmt-1',
-      client_id: 'cli-1',
-      amount: 89000,
-      currency: 'CLP',
-      paid_at: new Date(Date.now() - 15 * 24 * 3600 * 1000),
-      period_start: new Date(Date.now() - 15 * 24 * 3600 * 1000).toISOString().split('T')[0],
-      period_end: new Date(Date.now() + 15 * 24 * 3600 * 1000).toISOString().split('T')[0],
-      payment_method: 'MANUAL_TRANSFER',
-      notes: 'Pago mensualidad hosting y soporte web'
-    }
-  ],
+  payments: [],
   notifications: [],
-  migrations: [
-    {
-      id: 'mig-001',
-      client_id: null,
-      domain: 'clienteejemplo.cl',
-      backup_type: 'CPANEL_FULL',
-      backup_path: '/uploads/migrations/sample-backup.tar.gz',
-      backup_size_bytes: 1288490188,
-      detected_project_type: 'WORDPRESS',
-      analysis_report: null,
-      simulation_report: null,
-      migration_score: null,
-      status: 'COMPLETED',
-      started_at: '2026-06-15T10:00:00Z',
-      completed_at: '2026-06-15T10:12:00Z',
-      error_log: null,
-      rollback_data: null,
-      created_at: '2026-06-15T09:55:00Z',
-      updated_at: '2026-06-15T10:12:00Z',
-    }
-  ],
-  migration_logs: [
-    { id: 'mlog-001', migration_id: 'mig-001', step: 'extract_backup', message: 'Respaldo extraído exitosamente', status: 'SUCCESS', started_at: '2026-06-15T10:00:00Z', completed_at: '2026-06-15T10:01:30Z', details: null },
-    { id: 'mlog-002', migration_id: 'mig-001', step: 'create_database', message: 'Base de datos creada: wordpress_db', status: 'SUCCESS', started_at: '2026-06-15T10:01:30Z', completed_at: '2026-06-15T10:02:00Z', details: null },
-    { id: 'mlog-003', migration_id: 'mig-001', step: 'import_sql', message: 'SQL importado: 47 tablas', status: 'SUCCESS', started_at: '2026-06-15T10:02:00Z', completed_at: '2026-06-15T10:04:00Z', details: null },
-    { id: 'mlog-004', migration_id: 'mig-001', step: 'deploy_website', message: 'Archivos del sitio desplegados', status: 'SUCCESS', started_at: '2026-06-15T10:04:00Z', completed_at: '2026-06-15T10:06:00Z', details: null },
-    { id: 'mlog-005', migration_id: 'mig-001', step: 'configure_caddy', message: 'Proxy Caddy configurado', status: 'SUCCESS', started_at: '2026-06-15T10:06:00Z', completed_at: '2026-06-15T10:06:30Z', details: null },
-    { id: 'mlog-006', migration_id: 'mig-001', step: 'issue_ssl', message: 'Certificado SSL emitido vía Let\'s Encrypt', status: 'SUCCESS', started_at: '2026-06-15T10:06:30Z', completed_at: '2026-06-15T10:08:00Z', details: null },
-    { id: 'mlog-007', migration_id: 'mig-001', step: 'restore_mailboxes', message: '3 buzones restaurados en Mailcow', status: 'SUCCESS', started_at: '2026-06-15T10:08:00Z', completed_at: '2026-06-15T10:10:00Z', details: null },
-    { id: 'mlog-008', migration_id: 'mig-001', step: 'health_check', message: 'Todas las verificaciones pasaron correctamente', status: 'SUCCESS', started_at: '2026-06-15T10:10:00Z', completed_at: '2026-06-15T10:12:00Z', details: null },
-  ],
-  backups: [
-    { id: 'bkp-001', client_id: 'cli-1', filename: 'backup-papeles-concepcion-v1.tar.gz', file_path: '/uploads/backups/bkp-001.tar.gz', file_size: 524288000, backup_type: 'CPANEL_FULL', version: 1, notes: 'Migración inicial desde cPanel', created_at: '2026-06-15T09:55:00Z' }
-  ],
-  provisions: [
-    { id: 'prov-001', client_id: 'cli-2', domain: 'rabborestaurant.cl', project_type: 'WORDPRESS', manage_hosting: true, manage_email: true, email_accounts: [{name: 'contacto'}, {name: 'reservas'}], status: 'COMPLETED', provision_log: null, created_at: '2026-05-20T14:00:00Z', completed_at: '2026-05-20T14:05:00Z' }
-  ],
+  migrations: [],
+  migration_logs: [],
+  backups: [],
+  provisions: [],
   job_queue: [],
   audit_logs: [],
   server_health_metrics: []

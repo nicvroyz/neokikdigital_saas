@@ -37,51 +37,8 @@ export default function App() {
         fetch('/api/clients', { headers }),
       ]);
 
-      if (cliRes.ok) {
-        const rawClients = await cliRes.json();
-        
-        // Filter out specific seed data UUIDs (from legacy seed.sql) and mock memory IDs.
-        // This ensures the dashboard is clean, but allows future real registration of these client domains with random UUIDs.
-        const seedIds = [
-          'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', // Papeles Concepción
-          'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22', // Rabbo Restaurant
-          'c0eebc99-9c0b-4ef8-bb6d-6bb9bd380a33', // Boutique Imprenta
-          'cli-1',
-          'cli-2',
-          'cli-3'
-        ];
-        const realClients = rawClients.filter(c => !seedIds.includes(c.id));
-        setClients(realClients);
-
-        // Recalculate stats dynamically from real database clients
-        const calculatedStats = {
-          total_clients: realClients.length,
-          active_clients: realClients.filter(c => c.status === 'ACTIVE').length,
-          expired_clients: realClients.filter(c => c.status === 'EXPIRED').length,
-          suspended_clients: realClients.filter(c => c.status === 'SUSPENDED').length,
-          mrr: realClients.reduce((sum, c) => {
-            if (c.status === 'ACTIVE') {
-              const amount = Number(c.amount_per_period || 0);
-              if (c.plan_interval === 'QUARTERLY') return sum + (amount / 3);
-              if (c.plan_interval === 'SEMI_ANNUAL') return sum + (amount / 6);
-              if (c.plan_interval === 'ANNUAL') return sum + (amount / 12);
-              return sum + amount;
-            }
-            return sum;
-          }, 0)
-        };
-
-        if (sumRes.ok) {
-          const rawSummary = await sumRes.json();
-          // Filter out mock data inside summary
-          const realSummary = {
-            stats: calculatedStats,
-            upcoming_renewals: (rawSummary.upcoming_renewals || []).filter(r => !seedIds.includes(r.id)),
-            recent_payments: (rawSummary.recent_payments || []).filter(p => !seedIds.includes(p.client_id) && !seedIds.includes(p.id))
-          };
-          setSummary(realSummary);
-        }
-      }
+      if (cliRes.ok) setClients(await cliRes.json());
+      if (sumRes.ok) setSummary(await sumRes.json());
     } catch (err) {
       console.error('Error loading dashboard data:', err);
     } finally {

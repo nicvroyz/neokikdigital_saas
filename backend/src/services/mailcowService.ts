@@ -3,7 +3,7 @@ import { config } from '../config/env';
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function isDryRun(): boolean {
-  return !!config.caddy.dryRun;
+  return !!config.migration.dryRun;
 }
 
 function log(message: string): void {
@@ -15,6 +15,11 @@ function logError(message: string, err?: any): void {
 }
 
 function getHeaders(): Record<string, string> {
+  if (!isDryRun()) {
+    if (!config.mailcow.apiKey || config.mailcow.apiKey === 'mailcow-api-key-placeholder') {
+      throw new Error('Configuración de Mailcow incompleta (API Key faltante o es placeholder).');
+    }
+  }
   return {
     'Content-Type': 'application/json',
     'X-API-Key': config.mailcow.apiKey,
@@ -49,6 +54,16 @@ async function apiRequest(method: string, endpoint: string, body?: any): Promise
     if (!response.ok) {
       logError(`API respondió con status ${response.status}: ${JSON.stringify(data)}`);
       throw new Error(`Mailcow API error ${response.status}: ${typeof data === 'string' ? data : JSON.stringify(data)}`);
+    }
+
+    // Mailcow API frequently returns 200 OK but embeds a list of responses containing errors/warnings
+    if (Array.isArray(data)) {
+      const errorItem = data.find(item => item && (item.type === 'danger' || item.type === 'error'));
+      if (errorItem) {
+        const errorMsg = errorItem.log?.join(', ') || errorItem.msg?.join(', ') || JSON.stringify(errorItem);
+        logError(`Mailcow API retornó error interno: ${errorMsg}`);
+        throw new Error(`Mailcow API error: ${errorMsg}`);
+      }
     }
 
     return data;

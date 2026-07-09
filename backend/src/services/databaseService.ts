@@ -1,8 +1,10 @@
 import { execSync } from 'child_process';
 import { config } from '../config/env';
+import fs from 'fs';
+import path from 'path';
 
 function isDryRun(): boolean {
-  return !!config.caddy.dryRun;
+  return !!config.migration.dryRun;
 }
 
 function log(msg: string) {
@@ -39,7 +41,7 @@ export const databaseService = {
     }
   },
 
-  async importSQLDump(dbName: string, dumpFilePath: string): Promise<any> {
+  async importSQLDump(dbName: string, dumpFilePath: string, projectType?: string): Promise<any> {
     log(`Importando SQL dump: ${dumpFilePath} en base de datos: ${dbName}`);
     
     if (isDryRun()) {
@@ -54,6 +56,24 @@ export const databaseService = {
       const cmd = `docker exec -i ${mysqlContainer} mysql -u root -p${rootPass} ${dbName} < ${dumpFilePath}`;
       execSync(cmd);
       
+      log(`Validando importación para la base de datos: ${dbName}...`);
+      const checkCmd = `docker exec -i ${mysqlContainer} mysql -u root -p${rootPass} ${dbName} -e "SHOW TABLES;"`;
+      const stdout = execSync(checkCmd).toString().trim();
+      
+      const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length <= 1) { // SHOW TABLES outputs a header line, so length <= 1 means 0 tables!
+        throw new Error('La base de datos importada no contiene tablas.');
+      }
+
+      // If it's a WordPress migration, look for wp_* tables
+      if (projectType === 'WORDPRESS') {
+        const hasWpTables = lines.some(line => line.toLowerCase().startsWith('wp_') || line.toLowerCase().includes('_options'));
+        if (!hasWpTables) {
+          throw new Error("No se encontraron tablas de WordPress (wp_*) en la base de datos importada.");
+        }
+      }
+      
+      log('Validación de base de datos completada exitosamente.');
       return { success: true };
     } catch (err) {
       console.error('[DATABASE SERVICE ERROR] Failed to import SQL', err);

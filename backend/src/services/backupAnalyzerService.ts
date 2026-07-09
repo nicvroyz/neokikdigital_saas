@@ -51,12 +51,15 @@ export interface AnalysisReport {
   configFiles: string[];
   hiddenFiles: string[];
   backupSize: string;
+  domain?: string;
+  domainSource?: string;
+  confidence?: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function isDryRun(): boolean {
-  return !!config.caddy.dryRun;
+  return !!config.migration.dryRun;
 }
 
 function log(message: string): void {
@@ -71,6 +74,8 @@ function extractDomainFromPath(filePath: string): string {
   const base = path.basename(filePath);
   // Strip common archive extensions
   let clean = base.replace(/\.(tar\.gz|tgz|tar|zip|gz)$/i, '');
+  // Strip UUID suffix (looks like: 36 hex chars + hyphens)
+  clean = clean.replace(/^[a-fA-F0-9-]{36}-/, '');
   // Strip unique suffix added by multer (looks like: 1234567890-123456789-)
   clean = clean.replace(/^\d+-\d+-/, '');
   // Strip cPanel backup prefix: backup-M.D.YYYY_HH-MM-SS_
@@ -99,6 +104,123 @@ function extractDomainFromPath(filePath: string): string {
     return `${clean}.cl`;
   }
   return 'dominio-desconocido.com';
+}
+
+function isValidDomain(domain: string): boolean {
+  if (!domain) return false;
+  const d = domain.trim().toLowerCase();
+  
+  if (!/^[a-z0-9-]+\.[a-z]{2,}$/i.test(d)) return false;
+  
+  const exclusions = ['localhost', 'localhost.localdomain', 'localdomain', 'internal', 'cpanel', 'mailcow', 'caddy', 'mysql', 'postgres'];
+  if (exclusions.includes(d) || exclusions.some(ex => d.endsWith('.' + ex) || d.startsWith(ex + '.'))) return false;
+  
+  return true;
+}
+
+function resolveDomainFromBackup(contentRoot: string, filePath: string): { domain: string; domainSource: string; confidence: number } {
+  const userdataDir = path.join(contentRoot, 'userdata');
+  if (fs.existsSync(userdataDir)) {
+    const mainFile = path.join(userdataDir, 'main');
+    if (fs.existsSync(mainFile)) {
+      try {
+        const content = fs.readFileSync(mainFile, 'utf-8');
+        const match = content.match(/main_domain:\s*(\S+)/i);
+        if (match && isValidDomain(match[1])) {
+          return { domain: match[1].toLowerCase(), domainSource: 'cpanel_userdata', confidence: 100 };
+        }
+      } catch {}
+    }
+    
+    try {
+      const files = fs.readdirSync(userdataDir);
+      for (const file of files) {
+        if (isValidDomain(file)) {
+          return { domain: file.toLowerCase(), domainSource: 'cpanel_userdata', confidence: 95 };
+        }
+      }
+    } catch {}
+  }
+  
+  const cpMainFile = path.join(contentRoot, 'cp', 'main');
+  if (fs.existsSync(cpMainFile)) {
+    try {
+      const content = fs.readFileSync(cpMainFile, 'utf-8');
+      const match = content.match(/^(\S+)/m);
+      if (match && isValidDomain(match[1])) {
+        return { domain: match[1].toLowerCase(), domainSource: 'cpanel_metadata', confidence: 95 };
+      }
+    } catch {}
+  }
+
+  const wpConfigPaths = [
+    path.join(contentRoot, 'public_html', 'wp-config.php'),
+    path.join(contentRoot, 'homedir', 'public_html', 'wp-config.php'),
+  ];
+  for (const wpPath of wpConfigPaths) {
+    if (fs.existsSync(wpPath)) {
+      try {
+        const content = fs.readFileSync(wpPath, 'utf-8');
+        const urlMatch = content.match(/define\(\s*['"](?:WP_HOME|WP_SITEURL)['"]\s*,\s*['"]https?:\/\/([^'"]+)['"]\)/i);
+        if (urlMatch) {
+          const rawDomain = urlMatch[1].split('/')[0].replace(/^www\./i, '').trim();
+          if (isValidDomain(rawDomain)) {
+            return { domain: rawDomain.toLowerCase(), domainSource: 'wordpress_config', confidence: 90 };
+          }
+        }
+      } catch {}
+    }
+  }
+
+  const sqlDirs = [
+    path.join(contentRoot, 'mysql'),
+    contentRoot
+  ];
+  for (const sqlDir of sqlDirs) {
+    if (fs.existsSync(sqlDir)) {
+      try {
+        const files = fs.readdirSync(sqlDir).filter(f => f.endsWith('.sql'));
+        for (const file of files) {
+          const sqlPath = path.join(sqlDir, file);
+          const sqlContent = fs.readFileSync(sqlPath, 'utf-8');
+          const urlRegex = /'(?:siteurl|home)'\s*,\s*'https?:\/\/([^'"]+)'/i;
+          const match = sqlContent.match(urlRegex);
+          if (match) {
+            const rawDomain = match[1].split('/')[0].replace(/^www\./i, '').trim();
+            if (isValidDomain(rawDomain)) {
+              return { domain: rawDomain.toLowerCase(), domainSource: 'wordpress_database', confidence: 90 };
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
+  const mailDirs = [
+    path.join(contentRoot, 'mail'),
+    path.join(contentRoot, 'homedir', 'mail')
+  ];
+  for (const mailDir of mailDirs) {
+    if (fs.existsSync(mailDir)) {
+      try {
+        const dirs = fs.readdirSync(mailDir).filter(f => fs.statSync(path.join(mailDir, f)).isDirectory());
+        for (const dir of dirs) {
+          if (isValidDomain(dir)) {
+            return { domain: dir.toLowerCase(), domainSource: 'cpanel_mail_paths', confidence: 75 };
+          }
+        }
+      } catch {}
+    }
+  }
+
+  let filename = path.basename(filePath);
+  filename = filename.replace(/^[a-fA-F0-9-]{36}-/, '');
+  const fallbackDomain = extractDomainFromPath(filename);
+  if (isValidDomain(fallbackDomain)) {
+    return { domain: fallbackDomain.toLowerCase(), domainSource: 'filename_fallback', confidence: 40 };
+  }
+
+  return { domain: 'dominio-desconocido.com', domainSource: 'filename_fallback', confidence: 40 };
 }
 
 function getSimulatedReport(filePath: string): AnalysisReport {
@@ -227,6 +349,9 @@ function getSimulatedReport(filePath: string): AnalysisReport {
       'public_html/.maintenance',
     ],
     backupSize: fileSize,
+    domain,
+    domainSource: 'filename_fallback',
+    confidence: 40,
   };
 }
 
@@ -411,6 +536,8 @@ export const backupAnalyzerService = {
 
       // Detect domains
       const domains = this.detectDomains(contentRoot);
+      const resolvedDomainInfo = resolveDomainFromBackup(contentRoot, filePath);
+      domains.primary = resolvedDomainInfo.domain;
 
       // Detect WordPress details
       let wordpress: AnalysisReport['wordpress'] | undefined;
@@ -485,6 +612,9 @@ export const backupAnalyzerService = {
         configFiles,
         hiddenFiles,
         backupSize: formatBytes(backupStats.size),
+        domain: resolvedDomainInfo.domain,
+        domainSource: resolvedDomainInfo.domainSource,
+        confidence: resolvedDomainInfo.confidence,
       };
 
       return report;

@@ -29,7 +29,10 @@ export const config = {
   caddy: {
     configDir: process.env.CADDY_CONFIG_DIR || '/etc/caddy/conf.d',
     baseDocRoot: process.env.CLIENT_SITES_PATH || '/srv/neokik/sites',
-    dryRun: process.env.CADDY_DRY_RUN === 'true' || true, // Defaults to dry run for safety if not on real Linux server
+    dryRun: process.env.MIGRATION_DRY_RUN !== 'false',
+  },
+  migration: {
+    dryRun: process.env.MIGRATION_DRY_RUN !== 'false',
   },
   mailcow: {
     apiUrl: process.env.MAILCOW_API_URL || 'http://localhost:8080',

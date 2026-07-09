@@ -3,7 +3,7 @@ import { config } from '../config/env';
 import { containerTemplateService } from './containerTemplateService';
 
 function isDryRun(): boolean {
-  return !!config.caddy.dryRun;
+  return !!config.migration.dryRun;
 }
 
 function log(msg: string) {

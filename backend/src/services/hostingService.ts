@@ -3,6 +3,10 @@ import path from 'path';
 import { exec } from 'child_process';
 import { config } from '../config/env';
 
+function isDryRun(): boolean {
+  return !!config.migration.dryRun;
+}
+
 export const hostingService = {
   generateCaddyConfig(domain: string, docRoot: string, isSuspended: boolean): string {
     if (isSuspended) {
@@ -29,7 +33,7 @@ ${domain}, www.${domain} {
 `.trim();
   },
 
-  async applyCaddyConfig(domain: string, docRoot: string, isSuspended: boolean) {
+  async applyCaddyConfig(domain: string, docRoot: string, isSuspended: boolean): Promise<boolean> {
     const fileName = `${domain}.caddy`;
     const configPath = path.join(config.caddy.configDir, fileName);
     const content = this.generateCaddyConfig(domain, docRoot, isSuspended);
@@ -43,37 +47,42 @@ ${domain}, www.${domain} {
         fs.writeFileSync(path.join(docRoot, 'index.html'), `<h1>Welcome to ${domain}</h1><p>Hosted by Neokik Digital</p>`);
       }
 
-      // Write config if configuration folder exists
-      if (fs.existsSync(config.caddy.configDir)) {
-        fs.writeFileSync(configPath, content, 'utf-8');
-        
-        // Reload Caddy container (or native systemctl reload)
-        const isDryRun = !!config.caddy.dryRun;
-        if (!isDryRun) {
-          exec('docker exec neokik-caddy caddy reload --config /etc/caddy/Caddyfile', (err, stdout, stderr) => {
-            if (err) {
-              console.warn(`[HOSTING ENGINE WARNING] Caddy reload inside container failed, trying native reload...`);
-              exec('caddy reload', (nativeErr, nativeStdout, nativeStderr) => {
-                if (nativeErr) {
-                  console.error(`[HOSTING ENGINE ERROR] Caddy native reload failed: ${nativeStderr}`);
-                } else {
-                  console.log(`[HOSTING ENGINE] Caddy native reloaded successfully.`);
-                }
-              });
-            } else {
-              console.log(`[HOSTING ENGINE] Caddy container reloaded successfully.`);
-            }
-          });
-        } else {
-          console.log(`[HOSTING ENGINE (DRY RUN)] Would reload Caddy configuration.`);
-        }
-      } else {
+      if (isDryRun()) {
         console.log(`[HOSTING ENGINE (DRY RUN)] Would write Caddy config for ${domain} to ${configPath}`);
+        console.log(`[HOSTING ENGINE (DRY RUN)] Would reload Caddy configuration.`);
+        return true;
       }
-      return true;
+
+      // Ensure config directory exists
+      if (!fs.existsSync(config.caddy.configDir)) {
+        fs.mkdirSync(config.caddy.configDir, { recursive: true });
+      }
+
+      fs.writeFileSync(configPath, content, 'utf-8');
+
+      // Reload Caddy
+      return new Promise<boolean>((resolve, reject) => {
+        exec('docker exec neokik-caddy caddy reload --config /etc/caddy/Caddyfile', (err, stdout, stderr) => {
+          if (err) {
+            console.warn(`[HOSTING ENGINE WARNING] Caddy reload inside container failed, trying native reload...`);
+            exec('caddy reload', (nativeErr, nativeStdout, nativeStderr) => {
+              if (nativeErr) {
+                console.error(`[HOSTING ENGINE ERROR] Caddy native reload failed: ${nativeStderr || nativeErr.message}`);
+                reject(new Error(`Caddy reload failed inside container and natively: ${nativeStderr || nativeErr.message}`));
+              } else {
+                console.log(`[HOSTING ENGINE] Caddy native reloaded successfully.`);
+                resolve(true);
+              }
+            });
+          } else {
+            console.log(`[HOSTING ENGINE] Caddy container reloaded successfully.`);
+            resolve(true);
+          }
+        });
+      });
     } catch (err) {
       console.error(`[HOSTING ENGINE ERROR] Failed applying Caddy config for ${domain}:`, err);
-      return false;
+      throw err; // Propagate error in production
     }
   }
 };

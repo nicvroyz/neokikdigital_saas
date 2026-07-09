@@ -2,7 +2,7 @@ import { execSync } from 'child_process';
 import { config } from '../config/env';
 
 function isDryRun(): boolean {
-  return !!config.caddy.dryRun;
+  return !!config.migration.dryRun;
 }
 
 function log(msg: string) {
@@ -23,8 +23,8 @@ export const sslService = {
 
     try {
       // In production, we trigger Caddy to reload configuration
-      // Assuming Caddy container is running with name 'caddy-proxy'
-      const cmd = `docker exec caddy-proxy caddy reload --config /etc/caddy/Caddyfile`;
+      // Caddy container is running with name 'neokik-caddy'
+      const cmd = `docker exec neokik-caddy caddy reload --config /etc/caddy/Caddyfile`;
       log(`Ejecutando: ${cmd}`);
       execSync(cmd);
       
@@ -45,7 +45,7 @@ export const sslService = {
 
     try {
       // Caddy handles automatic renewal, but we can force it or check status
-      execSync(`docker exec caddy-proxy caddy reload`);
+      execSync(`docker exec neokik-caddy caddy reload`);
       return { success: true };
     } catch (err) {
       throw new Error(`Error al renovar SSL: ${(err as Error).message}`);

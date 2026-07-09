@@ -130,7 +130,7 @@ export const migrationService = {
       
       if (sqlFile) {
         await this.logStep(migrationId, 'database:restoring', `Importando archivo de base de datos ${path.basename(sqlFile)}...`, 'RUNNING', 40);
-        await databaseService.importSQLDump(dbName, sqlFile);
+        await databaseService.importSQLDump(dbName, sqlFile, mig.detected_project_type);
       }
       
       await this.logStep(migrationId, 'database:restoring', 'Base de datos MySQL configurada e importada.', 'SUCCESS', 50);
@@ -196,8 +196,8 @@ export const migrationService = {
       if (commands.length > 0) {
         log('Ejecutando comandos post-migración del framework...');
         for (const cmd of commands) {
+          const isDryRun = !!config.migration.dryRun;
           try {
-            const isDryRun = !!config.caddy.dryRun;
             if (!isDryRun) {
               const { execSync } = require('child_process');
               execSync(cmd);
@@ -206,6 +206,9 @@ export const migrationService = {
             }
           } catch (cmdErr) {
             console.error(`[COMMAND ERROR] Failed to run command: ${cmd}`, cmdErr);
+            if (!isDryRun) {
+              throw new Error(`Fallo al ejecutar comando post-migración: ${cmd}. Detalle: ${(cmdErr as Error).message}`);
+            }
           }
         }
       }
@@ -258,7 +261,7 @@ export const migrationService = {
       }
 
       // Create all mailboxes and migrate content
-      const isDryRunMode = !!config.caddy.dryRun;
+      const isDryRunMode = !!config.migration.dryRun;
       const migrationResults: string[] = [];
       let totalSourceMessages = 0;
       let totalDestMessages = 0;
@@ -357,6 +360,9 @@ export const migrationService = {
           }
         } catch (mbErr) {
           log(`Error al crear buzón ${email}: ${(mbErr as Error).message}`);
+          if (!isDryRunMode) {
+            throw mbErr;
+          }
           migrationResults.push(`${email}: ❌ Error al crear buzón`);
         }
       }

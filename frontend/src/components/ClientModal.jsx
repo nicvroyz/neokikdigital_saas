@@ -56,7 +56,7 @@ export default function ClientModal({ isOpen, onClose, onSubmit, initialData }) 
     setFormData((prev) => {
       const updated = { ...prev, [name]: value };
       if (name === 'domain' && !initialData) {
-        updated.doc_root = `/var/www/neokik/${value.replace(/[^a-z0-9]/gi, '_')}`;
+        updated.doc_root = `/caddy_data/${value.replace(/[^a-z0-9]/gi, '_')}`;
       }
       return updated;
     });
@@ -245,14 +245,14 @@ export default function ClientModal({ isOpen, onClose, onSubmit, initialData }) 
             </div>
 
             <div className="form-group">
-              <label className="form-label">Ruta Directorio en VPS (/var/www/neokik/)</label>
+              <label className="form-label">Ruta Directorio en Caddy (/caddy_data/)</label>
               <input
                 type="text"
                 name="doc_root"
                 className="form-input"
                 value={formData.doc_root}
                 onChange={handleChange}
-                placeholder="/var/www/neokik/dominiocliente"
+                placeholder="/caddy_data/dominiocliente"
               />
             </div>
           </div>

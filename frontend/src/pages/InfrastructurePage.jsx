@@ -8,6 +8,9 @@ import BackupManager from '../components/BackupManager';
 export default function InfrastructurePage({ token, clients }) {
   const [activeTab, setActiveTab] = useState('provision');
 
+  const activeCount = clients.filter(c => c.status === 'ACTIVE').length;
+  const suspendedCount = clients.filter(c => c.status === 'SUSPENDED').length;
+
   return (
     <div>
       {/* Top Header */}
@@ -58,7 +61,7 @@ export default function InfrastructurePage({ token, clients }) {
               {clients.length}
             </div>
             <div style={{ fontSize: '0.72rem', fontWeight: '700', opacity: 0.85, marginTop: '0.2rem' }}>
-              Migraciones Totales
+              Proyectos Totales
             </div>
           </div>
           <div style={{
@@ -70,10 +73,10 @@ export default function InfrastructurePage({ token, clients }) {
             border: '1px solid rgba(255,255,255,0.2)',
           }}>
             <div style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.65rem', fontWeight: '900', lineHeight: 1 }}>
-              100%
+              {activeCount}
             </div>
             <div style={{ fontSize: '0.72rem', fontWeight: '700', opacity: 0.85, marginTop: '0.2rem' }}>
-              Tasa de Éxito
+              Sitios Activos
             </div>
           </div>
           <div style={{
@@ -85,10 +88,10 @@ export default function InfrastructurePage({ token, clients }) {
             border: '1px solid rgba(255,255,255,0.2)',
           }}>
             <div style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.65rem', fontWeight: '900', lineHeight: 1 }}>
-              4.2m
+              {suspendedCount}
             </div>
             <div style={{ fontSize: '0.72rem', fontWeight: '700', opacity: 0.85, marginTop: '0.2rem' }}>
-              Duración Promedio
+              Sitios Suspendidos
             </div>
           </div>
         </div>

@@ -5,6 +5,9 @@ import { migrationService } from '../services/migrationService';
 import { eventBus } from '../services/eventBus';
 import { migrationPlannerService } from '../services/migrationPlannerService';
 import { config } from '../config/env';
+import os from 'os';
+import { execSync } from 'child_process';
+import { monitoringService } from '../services/monitoringService';
 
 export const infrastructureController = {
   // ==================== PROVISIONING ====================
@@ -327,29 +330,61 @@ export const infrastructureController = {
     }
   },
 
-  // ==================== SERVER STATUS ====================
-
   async getServerStatus(req: Request, res: Response) {
     try {
+      let metrics;
+      try {
+        metrics = await monitoringService.measureDiagnostics();
+      } catch (e) {
+        metrics = await monitoringService.getLatestHealthMetrics();
+      }
+
+      // Read real OS version from /etc/os-release if on Linux
+      let osName = 'No disponible';
+      if (process.platform === 'linux') {
+        try {
+          const osRelease = execSync("grep 'PRETTY_NAME' /etc/os-release | cut -d'=' -f2 | tr -d '\"'").toString().trim();
+          if (osRelease) osName = osRelease;
+        } catch {
+          osName = 'Linux ' + os.release();
+        }
+      } else {
+        osName = os.type() + ' ' + os.release();
+      }
+
+      // Check Caddy container status
+      let caddyStatus = 'inactive';
+      if (process.platform === 'linux' && !config.caddy.dryRun) {
+        try {
+          const out = execSync('docker inspect -f "{{.State.Status}}" neokik-caddy 2>/dev/null || docker inspect -f "{{.State.Status}}" caddy-proxy').toString().trim();
+          if (out === 'running') caddyStatus = 'running';
+        } catch {}
+      } else {
+        caddyStatus = 'running';
+      }
+
+      // Count actual sites and ssl certs from PostgreSQL clients
+      const clientsQuery = await query("SELECT COUNT(*) as count FROM clients WHERE status = 'ACTIVE'");
+      const activeSites = parseInt(clientsQuery.rows[0]?.count || '0', 10);
+
       const status = {
-        hostname: 'vps-neokik-prod',
-        ip: '152.0.0.1',
-        os: 'Ubuntu 24.04 LTS',
-        uptime_days: 127,
-        cpu: { cores: 4, usage_percent: 23.5 },
-        memory: { total_gb: 8, used_gb: 3.2, usage_percent: 40 },
-        disk: { total_gb: 160, used_gb: 67.3, usage_percent: 42.1 },
+        hostname: os.hostname() || 'No disponible',
+        os: osName,
+        uptime_days: Math.floor(os.uptime() / (3600 * 24)),
+        cpu: { cores: os.cpus().length, usage_percent: metrics.cpu_usage },
+        memory: { total_gb: metrics.ram_total_gb, used_gb: metrics.ram_used_gb, usage_percent: Math.round((metrics.ram_used_gb / metrics.ram_total_gb) * 100) },
+        disk: { total_gb: metrics.disk_total_gb, used_gb: metrics.disk_used_gb, usage_percent: Math.round((metrics.disk_used_gb / metrics.disk_total_gb) * 100) },
         services: {
-          caddy: { status: 'running', version: '2.7.6' },
-          mysql: { status: 'running', version: '8.0.36' },
-          php_fpm: { status: 'running', version: '8.2.18' },
-          mailcow: { status: 'running', version: '2024.06' },
-          redis: { status: 'running', version: '7.2.4' },
+          caddy: { status: caddyStatus },
+          postgres: { status: metrics.postgres_status },
+          mailcow: { status: metrics.mailcow_status },
+          docker: { status: metrics.docker_status }
         },
-        active_sites: 12,
-        ssl_certificates: 12,
+        active_sites: activeSites,
+        ssl_certificates: activeSites,
         last_backup: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
       };
+
       return res.json(status);
     } catch (err) {
       console.error('Error fetching server status:', err);
@@ -429,7 +464,7 @@ export const infrastructureController = {
       }
       return res.json({
         message: `Servicios reiniciados para ${client.rows[0].domain}`,
-        services_restarted: ['php-fpm', 'caddy'],
+        services_restarted: ['caddy', 'docker-container'],
         timestamp: new Date().toISOString(),
       });
     } catch (err) {

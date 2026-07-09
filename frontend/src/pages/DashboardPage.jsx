@@ -172,7 +172,6 @@ export default function DashboardPage({ summary, onAddClient, onNavigateClients,
           icon={DollarSign}
           color="#284999"
           bg="#eef2ff"
-          trend="14.2% respecto al período anterior"
         />
         <StatsCard
           label="Sitios Web Activos"
@@ -180,7 +179,6 @@ export default function DashboardPage({ summary, onAddClient, onNavigateClients,
           icon={CheckCircle2}
           color="#059669"
           bg="#dcfce7"
-          trend="100% servicio en línea"
         />
         <StatsCard
           label="Vencidos (En Período de Gracia)"

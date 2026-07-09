@@ -22,7 +22,7 @@ const keyframesStyle = `
 
 const MIGRATION_TEMPLATE = [
   { step: 'backup:extracting', label: 'Extraer archivos de respaldo', description: 'Descompresión del archivo tar.gz/zip...' },
-  { step: 'database:restoring', label: 'Restaurar base de datos', description: 'Configurando motor de base de datos MySQL e importando tablas...' },
+  { step: 'database:restoring', label: 'Restaurar base de datos', description: 'Configurando motor de base de datos PostgreSQL e importando tablas...' },
   { step: 'container:creating', label: 'Crear contenedor Docker', description: 'Creando contenedor e iniciando servicios aislados del cliente...' },
   { step: 'plugin:executing', label: 'Ejecutar plugins del framework', description: 'Configurando archivo wp-config.php/.env y ejecutando comandos del plugin...' },
   { step: 'ssl:generating', label: 'Configurar enrutamiento SSL', description: 'Generando certificados SSL seguros Let\'s Encrypt en proxy Caddy...' },

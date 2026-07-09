@@ -1,10 +1,10 @@
 import React from 'react';
 import { LayoutDashboard, Users, Server, Settings, LogOut, Zap, Briefcase, Send, HardDrive } from 'lucide-react';
 
-export default function Sidebar({ activeTab, setActiveTab, onLogout, onTriggerAudit }) {
+export default function Sidebar({ activeTab, setActiveTab, onLogout, onTriggerAudit, clientsCount }) {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'clients', label: 'Clientes', icon: Users, badge: '4' },
+    { id: 'clients', label: 'Clientes', icon: Users, badge: clientsCount !== undefined ? String(clientsCount) : '0' },
     { id: 'operations', label: 'Workload', icon: Briefcase },
     { id: 'communications', label: 'Comunicaciones', icon: Send, badge: 'NUEVO' },
     { id: 'hosting', label: 'Servidor', icon: Server },

@@ -369,7 +369,7 @@ export default function InfraClientPanel({ token, clients }) {
             {activeSection === 'database' && (
               <div>
                 <h4 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.15rem', fontWeight: '800', marginBottom: '1.25rem' }}>
-                  Gestión de Base de Datos MySQL
+                  Gestión de Base de Datos PostgreSQL
                 </h4>
 
                 <div style={{ padding: '1.5rem', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', backgroundColor: '#f8fafc', marginBottom: '2rem' }}>

@@ -165,6 +165,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         onLogout={handleLogout}
         onTriggerAudit={handleTriggerAudit}
+        clientsCount={clients.length}
       />
 
       <main className="main-content">
@@ -223,6 +224,7 @@ export default function App() {
           <HostingPage
             clients={clients}
             onSyncCaddy={handleSyncCaddy}
+            token={token}
           />
         )}
 

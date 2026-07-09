@@ -1,10 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Server, HardDrive, ShieldCheck, Terminal, RefreshCw, Code, CheckCircle, Zap } from 'lucide-react';
 
-export default function HostingPage({ clients, onSyncCaddy }) {
+export default function HostingPage({ clients, onSyncCaddy, token }) {
   const [selectedDomainForConfig, setSelectedDomainForConfig] = useState(null);
   const [terminalOutput, setTerminalOutput] = useState('');
   const [isRunningCommand, setIsRunningCommand] = useState(false);
+  const [serverStatus, setServerStatus] = useState(null);
+
+  useEffect(() => {
+    if (!token) return;
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch('/api/infrastructure/server/status', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          setServerStatus(await res.json());
+        }
+      } catch (err) {
+        console.error('Error fetching server status:', err);
+      }
+    };
+    fetchStatus();
+  }, [token]);
 
   const activeCount = clients.filter(c => c.status === 'ACTIVE').length;
   const suspendedCount = clients.filter(c => c.status === 'SUSPENDED').length;
@@ -82,8 +100,10 @@ ${client.domain}, www.${client.domain} {
             <span style={{ fontSize: '0.825rem', fontWeight: '700', color: 'var(--text-sub)' }}>SO y Servidor</span>
             <Server size={18} color="var(--brand-indigo)" />
           </div>
-          <div style={{ fontSize: '1.2rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif' }}>Ubuntu 22.04 LTS</div>
-          <div style={{ fontSize: '0.78rem', color: '#059669', fontWeight: '700', marginTop: '0.2rem' }}>● Servidor En Línea (vps-neokik-01)</div>
+          <div style={{ fontSize: '1.2rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif' }}>{serverStatus ? serverStatus.os : 'Cargando...'}</div>
+          <div style={{ fontSize: '0.78rem', color: serverStatus ? '#059669' : 'var(--text-muted)', fontWeight: '700', marginTop: '0.2rem' }}>
+            ● Servidor {serverStatus ? 'En Línea' : 'Cargando...'} ({serverStatus ? serverStatus.hostname : 'Cargando...'})
+          </div>
         </div>
 
         <div className="card" style={{ padding: '1.25rem' }}>
@@ -92,7 +112,9 @@ ${client.domain}, www.${client.domain} {
             <Zap size={18} color="#0284c7" />
           </div>
           <div style={{ fontSize: '1.2rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif' }}>Docker Proxy Inverso</div>
-          <div style={{ fontSize: '0.78rem', color: '#059669', fontWeight: '700', marginTop: '0.2rem' }}>● neokik-caddy activo (ejecutándose)</div>
+          <div style={{ fontSize: '0.78rem', color: serverStatus?.services?.caddy?.status === 'running' ? '#059669' : '#be123c', fontWeight: '700', marginTop: '0.2rem' }}>
+            ● neokik-caddy {serverStatus?.services?.caddy?.status === 'running' ? 'activo (ejecutándose)' : 'inactivo'}
+          </div>
         </div>
 
         <div className="card" style={{ padding: '1.25rem' }}>
@@ -106,11 +128,15 @@ ${client.domain}, www.${client.domain} {
 
         <div className="card" style={{ padding: '1.25rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '0.825rem', fontWeight: '700', color: 'var(--text-sub)' }}>Almacenamiento /var/www</span>
+            <span style={{ fontSize: '0.825rem', fontWeight: '700', color: 'var(--text-sub)' }}>Almacenamiento VPS</span>
             <HardDrive size={18} color="#d97706" />
           </div>
-          <div style={{ fontSize: '1.2rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif' }}>14.8 GB / 80 GB</div>
-          <div style={{ fontSize: '0.78rem', color: '#059669', fontWeight: '700', marginTop: '0.2rem' }}>18.5% Uso de Disco</div>
+          <div style={{ fontSize: '1.2rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif' }}>
+            {serverStatus ? `${serverStatus.disk.used_gb} GB / ${serverStatus.disk.total_gb} GB` : 'Cargando...'}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: '#059669', fontWeight: '700', marginTop: '0.2rem' }}>
+            {serverStatus ? `${serverStatus.disk.usage_percent}% Uso de Disco` : 'Cargando...'}
+          </div>
         </div>
       </div>
 

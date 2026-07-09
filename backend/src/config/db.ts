@@ -9,7 +9,7 @@ export const pool = new Pool({
   database: config.db.database,
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000,
 });
 
 let isDbConnected = false;
@@ -25,7 +25,7 @@ pool.connect((err, client, release) => {
       console.error('================================================================');
       process.exit(1);
     } else {
-      console.warn('⚠️ PostgreSQL local database not detected. Operating in High-Performance In-Memory Mode with sample agency data.');
+      console.warn('⚠️ PostgreSQL local database not detected:', err.message, '- Operating in High-Performance In-Memory Mode with sample agency data.');
       isDbConnected = false;
     }
   } else {

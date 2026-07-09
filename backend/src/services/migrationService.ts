@@ -389,7 +389,7 @@ export const migrationService = {
             last_payment_date: new Date().toISOString().split('T')[0],
             expiration_date: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().split('T')[0], // 30 days initial trial
             grace_period_days: 5,
-            doc_root: `/var/www/neokik/${domain}`,
+            doc_root: `/srv/neokik/sites/${domain}`,
             notes: `Cliente registrado automáticamente a través del motor de migración cPanel el ${new Date().toLocaleDateString('es-CL')}.`
           });
           log(`Registro del cliente para ${domain} creado con éxito.`);

@@ -56,7 +56,7 @@ export const clientService = {
   },
 
   async createClient(data: ClientData) {
-    const docRoot = data.doc_root || `/var/www/neokik/${data.domain.replace(/[^a-z0-9]/gi, '_')}`;
+    const docRoot = data.doc_root || `/srv/neokik/sites/${data.domain.replace(/[^a-z0-9]/gi, '_')}`;
     const status = data.status || 'ACTIVE';
     const graceDays = data.grace_period_days !== undefined ? data.grace_period_days : 5;
 

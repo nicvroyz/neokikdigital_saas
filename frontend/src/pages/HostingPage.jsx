@@ -60,7 +60,7 @@ export default function HostingPage({ clients, onSyncCaddy, token }) {
 
 ${client.domain}, www.${client.domain} {
     # Enrutamiento a pantalla de suspensión
-    root * /var/www/neokik
+    root * /srv/neokik
     file_server
     try_files /suspended.html =503
 }`;
@@ -191,7 +191,7 @@ ${client.domain}, www.${client.domain} {
                       {client.status === 'SUSPENDED' ? (
                         <div>
                           <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#be123c' }}>
-                            /var/www/neokik/suspended.html
+                            /srv/neokik/suspended.html
                           </span>
                           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>HTTP 503 Modo Suspensión</div>
                         </div>

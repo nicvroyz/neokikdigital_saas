@@ -21,7 +21,7 @@ ${domain} {
   generateDockerRunCommand(domain: string, projectType: string, phpVersion: string): string {
     log(`Generando docker run para: ${domain}`);
     const containerName = domain.replace(/[^a-zA-Z0-9]/g, '_');
-    const docRoot = `${config.caddy.baseDocRoot}/${domain}`;
+    const docRoot = `${config.caddy.baseDocRoot}/sites/${domain}`;
     
     // Connected to Caddy central proxy network
     return `docker run -d \\

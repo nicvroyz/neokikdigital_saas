@@ -29,6 +29,7 @@ export default function MigrationWizard({ token, clients, onComplete }) {
   const [healthCheckReport, setHealthCheckReport] = useState(null);
   const [dnsData, setDnsData] = useState(null);
   const [passwordsList, setPasswordsList] = useState([]);
+  const [pendingMigration, setPendingMigration] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
 
   const fileInputRef = useRef(null);
@@ -54,12 +55,10 @@ export default function MigrationWizard({ token, clients, onComplete }) {
       window.removeEventListener('unhandledrejection', handleRejection);
     };
   }, []);
-
-  // Restore active migration if present in localStorage
   useEffect(() => {
     const activeId = localStorage.getItem('activeMigrationId');
     if (activeId && token) {
-      const restoreMigration = async () => {
+      const fetchPendingMigration = async () => {
         try {
           const res = await fetch(`/api/infrastructure/migrations/${activeId}`, {
             headers: {
@@ -73,56 +72,60 @@ export default function MigrationWizard({ token, clients, onComplete }) {
           }
           
           const migration = await res.json();
-          setMigrationId(migration.id);
-          
-          let report = null;
-          if (migration.analysis_report) {
-            report = typeof migration.analysis_report === 'string'
-              ? JSON.parse(migration.analysis_report)
-              : migration.analysis_report;
-            setAnalysisReport(report);
-          }
-
-          if (migration.logs && Array.isArray(migration.logs)) {
-            setMigrationLogs(migration.logs.map(log => ({
-              id: `log-${Date.now()}-${Math.random()}`,
-              step: log.step,
-              message: log.message,
-              status: log.status,
-              percentage: log.percentage,
-              startedAt: log.started_at,
-              completedAt: log.completed_at
-            })));
-          }
-
-          if (migration.status === 'MIGRATING') {
-            const startTime = migration.started_at ? new Date(migration.started_at).getTime() : Date.now();
-            listenToMigrationStream(migration.id, startTime);
-          } else if (migration.status === 'FAILED') {
-            setOverallStatus('FAILED');
-            setIsExecuting(false);
-            setCurrentStep(4);
-            setErrorMsg(migration.error_log || 'La migración falló. El motor de autorrecuperación revertirá los cambios.');
-          } else if (migration.status === 'COMPLETED') {
-            localStorage.removeItem('activeMigrationId');
-          } else if (report) {
-            if (migration.simulation_report) {
-              const simReport = typeof migration.simulation_report === 'string'
-                ? JSON.parse(migration.simulation_report)
-                : migration.simulation_report;
-              setSimulationReport(simReport);
-            } else {
-              runSimulation(migration.id);
-            }
-            setCurrentStep(3);
-          }
+          setPendingMigration(migration);
         } catch (err) {
-          console.error('Error restoring migration:', err);
+          console.error('Error fetching pending migration:', err);
         }
       };
-      restoreMigration();
+      fetchPendingMigration();
     }
   }, [token]);
+
+  const handleRestore = (migration) => {
+    setMigrationId(migration.id);
+    
+    let report = null;
+    if (migration.analysis_report) {
+      report = typeof migration.analysis_report === 'string'
+        ? JSON.parse(migration.analysis_report)
+        : migration.analysis_report;
+      setAnalysisReport(report);
+    }
+
+    if (migration.logs && Array.isArray(migration.logs)) {
+      setMigrationLogs(migration.logs.map(log => ({
+        id: `log-${Date.now()}-${Math.random()}`,
+        step: log.step,
+        message: log.message,
+        status: log.status,
+        percentage: log.percentage,
+        startedAt: log.started_at,
+        completedAt: log.completed_at
+      })));
+    }
+
+    if (migration.status === 'MIGRATING') {
+      const startTime = migration.started_at ? new Date(migration.started_at).getTime() : Date.now();
+      listenToMigrationStream(migration.id, startTime);
+    } else if (migration.status === 'FAILED') {
+      setOverallStatus('FAILED');
+      setIsExecuting(false);
+      setCurrentStep(4);
+      setErrorMsg(migration.error_log || 'La migración falló. El motor de autorrecuperación revertirá los cambios.');
+    } else if (migration.status === 'COMPLETED') {
+      localStorage.removeItem('activeMigrationId');
+    } else if (report) {
+      if (migration.simulation_report) {
+        const simReport = typeof migration.simulation_report === 'string'
+          ? JSON.parse(migration.simulation_report)
+          : migration.simulation_report;
+        setSimulationReport(simReport);
+      } else {
+        runSimulation(migration.id);
+      }
+      setCurrentStep(3);
+    }
+  };
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -678,7 +681,69 @@ export default function MigrationWizard({ token, clients, onComplete }) {
 
       {/* STEP 1: UPLOAD BACKUP */}
       {currentStep === 1 && (
-        <div className="card" style={{ padding: '2.5rem 2rem' }}>
+        <>
+          {pendingMigration && (
+            <div className="card" style={{
+              background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+              border: '1px solid #bfdbfe',
+              padding: '1.5rem',
+              borderRadius: 'var(--radius-md)',
+              marginBottom: '2rem',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              animation: 'pwFadeIn 0.3s ease'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{
+                  width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#3b82f6',
+                  color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  <RefreshCw size={24} className="spin-slow" />
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontWeight: '800', color: '#1e3a8a', fontSize: '1.05rem' }}>
+                    Migración Pendiente Detectada
+                  </h4>
+                  <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#1e40af' }}>
+                    Existe una migración activa para el dominio <strong>{pendingMigration.domain || 'desconocido'}</strong> ({
+                      pendingMigration.status === 'MIGRATING' ? 'En ejecución' : 
+                      pendingMigration.status === 'FAILED' ? 'Fallida' : 'Lista para iniciar'
+                    }).
+                  </p>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ borderColor: '#bfdbfe', color: '#1e40af', backgroundColor: 'transparent' }}
+                  onClick={() => {
+                    localStorage.removeItem('activeMigrationId');
+                    setPendingMigration(null);
+                  }}
+                >
+                  Descartar
+                </button>
+                <button 
+                  className="btn btn-primary"
+                  style={{
+                    backgroundColor: '#3b82f6',
+                    borderColor: '#3b82f6',
+                    color: 'white',
+                    fontWeight: '800'
+                  }}
+                  onClick={() => {
+                    handleRestore(pendingMigration);
+                    setPendingMigration(null);
+                  }}
+                >
+                  Retomar Paso
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="card" style={{ padding: '2.5rem 2rem' }}>
           <h3 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.35rem', fontWeight: '800', marginBottom: '1.25rem', textAlign: 'center' }}>
             Selecciona el Tipo de Respaldo a Migrar
           </h3>
@@ -819,6 +884,7 @@ export default function MigrationWizard({ token, clients, onComplete }) {
             </button>
           </div>
         </div>
+        </>
       )}
 
       {/* STEP 2: SMART ANALYSIS SCANNER */}

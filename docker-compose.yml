@@ -18,6 +18,15 @@ services:
       timeout: 5s
       retries: 5
 
+  mysql:
+    image: mariadb:10.11
+    container_name: neokik-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+
   backend:
     build:
       context: ./backend
@@ -36,6 +45,7 @@ services:
       MIGRATION_DRY_RUN: ${MIGRATION_DRY_RUN:-true}
       MAILCOW_API_URL: ${MAILCOW_API_URL}
       MAILCOW_API_KEY: ${MAILCOW_API_KEY}
+      MYSQL_CONTAINER_NAME: ${MYSQL_CONTAINER_NAME:-neokik-mysql}
       CLIENT_SITES_PATH: /srv/neokik/sites
       BACKUP_PATH: /srv/neokik/backups
       STORAGE_PATH: /srv/neokik/storage
@@ -78,3 +88,4 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
+  mysql_data:

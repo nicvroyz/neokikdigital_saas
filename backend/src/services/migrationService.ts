@@ -87,6 +87,8 @@ export const migrationService = {
       const backupPath = mig.backup_path;
       const destDir = path.join(config.infrastructure.storagePath, 'migrations', 'extracted', migrationId);
 
+      let analysisReport: any = null;
+
       // Reset logs
       await query('DELETE FROM migration_logs WHERE migration_id = $1', [migrationId]);
       
@@ -112,29 +114,40 @@ export const migrationService = {
       await query('UPDATE migrations SET rollback_step = \'CLEANUP_EXTRACTED\' WHERE id = $1', [migrationId]);
 
       // Step 2: Create MySQL database and import data (25%)
-      log('Paso 2: Creando base de datos MySQL...');
-      await this.logStep(migrationId, 'database:restoring', 'Creando base de datos y usuario en contenedor MySQL...', 'RUNNING', 30);
       const dbName = `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
       const dbUser = `user_${domain.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 10)}`;
       const dbPass = `Pass_${Math.random().toString(36).substring(2, 10)}!`;
-      
-      await databaseService.createDatabase(dbName, dbUser, dbPass);
-      
-      // Look for SQL dump in backup
-      const sqlDir = path.join(destDir, 'mysql');
-      let sqlFile = '';
-      if (fs.existsSync(sqlDir)) {
-        const files = fs.readdirSync(sqlDir).filter(f => f.endsWith('.sql') || f.endsWith('.sql.gz'));
-        if (files.length > 0) sqlFile = path.join(sqlDir, files[0]);
+
+      try {
+        analysisReport = typeof mig.analysis_report === 'string' ? JSON.parse(mig.analysis_report) : mig.analysis_report;
+      } catch { /* ignore parse errors */ }
+
+      const hasDatabases = analysisReport?.databases && Array.isArray(analysisReport.databases) && analysisReport.databases.length > 0;
+
+      if (hasDatabases) {
+        log('Paso 2: Creando base de datos MySQL...');
+        await this.logStep(migrationId, 'database:restoring', 'Creando base de datos y usuario en contenedor MySQL...', 'RUNNING', 30);
+        await databaseService.createDatabase(dbName, dbUser, dbPass);
+        
+        // Look for SQL dump in backup
+        const sqlDir = path.join(destDir, 'mysql');
+        let sqlFile = '';
+        if (fs.existsSync(sqlDir)) {
+          const files = fs.readdirSync(sqlDir).filter(f => f.endsWith('.sql') || f.endsWith('.sql.gz'));
+          if (files.length > 0) sqlFile = path.join(sqlDir, files[0]);
+        }
+        
+        if (sqlFile) {
+          await this.logStep(migrationId, 'database:restoring', `Importando archivo de base de datos ${path.basename(sqlFile)}...`, 'RUNNING', 40);
+          await databaseService.importSQLDump(dbName, sqlFile, mig.detected_project_type);
+        }
+        
+        await this.logStep(migrationId, 'database:restoring', 'Base de datos MySQL configurada e importada.', 'SUCCESS', 50);
+        await query('UPDATE migrations SET rollback_step = \'DROP_DATABASE\' WHERE id = $1', [migrationId]);
+      } else {
+        log('Omitiendo creación de base de datos MySQL (no se detectaron bases de datos en el reporte).');
+        await this.logStep(migrationId, 'database:restoring', 'No se detectaron bases de datos. Omitiendo paso de base de datos.', 'SUCCESS', 50);
       }
-      
-      if (sqlFile) {
-        await this.logStep(migrationId, 'database:restoring', `Importando archivo de base de datos ${path.basename(sqlFile)}...`, 'RUNNING', 40);
-        await databaseService.importSQLDump(dbName, sqlFile, mig.detected_project_type);
-      }
-      
-      await this.logStep(migrationId, 'database:restoring', 'Base de datos MySQL configurada e importada.', 'SUCCESS', 50);
-      await query('UPDATE migrations SET rollback_step = \'DROP_DATABASE\' WHERE id = $1', [migrationId]);
 
       // Apply framework configurations
       log('Aplicando reconfiguraciones de archivos específicas del framework...');
@@ -226,7 +239,6 @@ export const migrationService = {
       await mailcowService.createDomain(domain);
       
       // Parse analysis report for detected email accounts
-      let analysisReport: any = null;
       try {
         analysisReport = typeof mig.analysis_report === 'string' ? JSON.parse(mig.analysis_report) : mig.analysis_report;
       } catch { /* ignore parse errors */ }

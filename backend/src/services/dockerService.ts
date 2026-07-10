@@ -13,7 +13,14 @@ function log(msg: string) {
 }
 
 export const dockerService = {
-  async createContainer(domain: string, projectType: string, phpVersion: string): Promise<any> {
+  async createContainer(
+    domain: string,
+    projectType: string,
+    phpVersion: string,
+    dbName?: string,
+    dbUser?: string,
+    dbPass?: string
+  ): Promise<any> {
     log(`Creando contenedor Docker (docker-compose) para: ${domain} (PHP: ${phpVersion}, Tipo: ${projectType})`);
     
     if (isDryRun()) {
@@ -38,13 +45,13 @@ export const dockerService = {
         fs.mkdirSync(docRoot, { recursive: true });
       }
 
-      // Generate DB credentials placeholder for docker-compose environment variables list
-      const dbName = `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
-      const dbUser = `user_${domain.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 10)}`;
-      const dbPass = `Pass_Placeholder123!`;
+      // Generate DB credentials placeholders if not provided
+      const finalDbName = dbName || `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      const finalDbUser = dbUser || `user_${domain.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 10)}`;
+      const finalDbPass = dbPass || `Pass_Placeholder123!`;
 
       // Generate and write docker-compose.yml file
-      const composeContent = containerTemplateService.generateDockerComposeFile(domain, projectType, phpVersion, dbName, dbUser, dbPass);
+      const composeContent = containerTemplateService.generateDockerComposeFile(domain, projectType, phpVersion, finalDbName, finalDbUser, finalDbPass);
       const composePath = path.join(siteRoot, 'docker-compose.yml');
       fs.writeFileSync(composePath, composeContent, 'utf-8');
       

@@ -203,7 +203,7 @@ export const migrationService = {
         // Step 5: Crear contenedor
         log('Paso 5: Creando contenedor Docker...');
         await this.logStep(migrationId, 'container:creating', 'Creando y enlazando contenedor Docker con volumenes...', 'RUNNING', 60);
-        await dockerService.createContainer(domain, mig.detected_project_type || 'WORDPRESS', '8.2');
+        await dockerService.createContainer(domain, mig.detected_project_type || 'WORDPRESS', '8.2', dbName, dbUser, dbPass);
         await query('UPDATE migrations SET rollback_step = \'REMOVE_CONTAINER\' WHERE id = $1', [migrationId]);
 
         // Step 6: Esperar que el contenedor esté listo (Rule 3)

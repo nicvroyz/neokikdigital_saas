@@ -55,7 +55,7 @@ export const provisioningService = {
         await databaseService.createDatabase(dbName, dbUser, dbPass);
         
         // Create Container
-        await dockerService.createContainer(domain, prov.project_type || 'WORDPRESS', '8.2');
+        await dockerService.createContainer(domain, prov.project_type || 'WORDPRESS', '8.2', dbName, dbUser, dbPass);
         
         // Configure SSL on proxy Caddy
         await sslService.configureSSL(domain);

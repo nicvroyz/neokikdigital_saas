@@ -21,12 +21,12 @@ export const validateArchiveSafety = (filePath: string): boolean => {
     let fileList = '';
     if (filePath.endsWith('.zip')) {
       if (isWindows) {
-        fileList = execSync(`powershell -Command "[void][System.Reflection.Assembly]::LoadWithPartialName('System.IO.Compression.FileSystem'); ([System.IO.Compression.ZipFile]::OpenRead('${filePath.replace(/\\/g, '\\\\')}')).Entries | Select-Object -ExpandProperty FullName"`, { encoding: 'utf-8', timeout: 5000 });
+        fileList = execSync(`powershell -Command "[void][System.Reflection.Assembly]::LoadWithPartialName('System.IO.Compression.FileSystem'); ([System.IO.Compression.ZipFile]::OpenRead('${filePath.replace(/\\/g, '\\\\')}')).Entries | Select-Object -ExpandProperty FullName"`, { encoding: 'utf-8' });
       } else {
-        fileList = execSync(`unzip -Z1 "${filePath}"`, { encoding: 'utf-8', timeout: 5000 });
+        fileList = execSync(`unzip -Z1 "${filePath}"`, { encoding: 'utf-8' });
       }
     } else if (filePath.endsWith('.tar.gz') || filePath.endsWith('.tgz') || filePath.endsWith('.tar')) {
-      fileList = execSync(`tar -tf "${filePath}"`, { encoding: 'utf-8', timeout: 10000 });
+      fileList = execSync(`tar -tf "${filePath}"`, { encoding: 'utf-8' });
     }
 
     const lines = fileList.split('\n');
@@ -34,38 +34,14 @@ export const validateArchiveSafety = (filePath: string): boolean => {
       const cleanLine = line.trim();
       if (!cleanLine) continue;
 
-      const entryPath = cleanLine;
+      const entryName = cleanLine;
+      const normalized = entryName.replace(/\\/g, '/');
 
-      // Check if entry starts with "../" or "..\"
-      if (entryPath.startsWith('../') || entryPath.startsWith('..\\')) {
-        return false;
-      }
-
-      // Check if entry starts with "/" or "\"
-      if (entryPath.startsWith('/') || entryPath.startsWith('\\')) {
-        return false;
-      }
-
-      // Check if it's a Windows absolute path (e.g. C:\)
-      if (/^[a-zA-Z]:/.test(entryPath)) {
-        return false;
-      }
-
-      // Check if it's a UNC path (\\server\share)
-      if (entryPath.startsWith('\\\\')) {
-        return false;
-      }
-
-      // Normalize using path.posix.normalize() and check for ".." segments
-      const normalized = path.posix.normalize(entryPath);
-      if (normalized.startsWith('../') || normalized === '..') {
-        return false;
-      }
-
-      // Also normalize with backslashes converted to forward slashes
-      const posixPath = entryPath.replace(/\\/g, '/');
-      const normalizedPosix = path.posix.normalize(posixPath);
-      if (normalizedPosix.startsWith('../') || normalizedPosix === '..') {
+      if (
+        normalized.includes('../') ||
+        normalized.startsWith('/') ||
+        /^[a-zA-Z]:\//.test(normalized)
+      ) {
         return false;
       }
     }

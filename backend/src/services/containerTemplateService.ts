@@ -36,6 +36,7 @@ services:
       - ./public_html:/var/www/html
     networks:
       - caddy_proxy
+      - neokikdigital_saas_default
     environment:
       - WORDPRESS_DB_HOST=${mysqlContainer}
       - WORDPRESS_DB_NAME=${dbName}
@@ -51,6 +52,9 @@ networks:
   caddy_proxy:
     external: true
     name: caddy_proxy
+  neokikdigital_saas_default:
+    external: true
+    name: neokikdigital_saas_default
 `.trim();
   }
 };

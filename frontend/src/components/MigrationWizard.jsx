@@ -631,7 +631,13 @@ export default function MigrationWizard({ token, clients, onComplete }) {
     setHealthCheckReport(null);
     setDnsData(null);
     setOverallStatus('RUNNING');
-    setErrorMsg(null);
+  };
+
+  const handleFinalize = () => {
+    localStorage.removeItem('activeMigrationId');
+    if (typeof onComplete === 'function') {
+      onComplete();
+    }
   };
 
   return (
@@ -1231,7 +1237,7 @@ export default function MigrationWizard({ token, clients, onComplete }) {
             <button className="btn btn-secondary" onClick={resetWizard}>
               Nueva Migración
             </button>
-            <button className="btn btn-primary" onClick={onComplete}>
+            <button className="btn btn-primary" onClick={handleFinalize}>
               Finalizar y Ver Sitios
             </button>
           </div>

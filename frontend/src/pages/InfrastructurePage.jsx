@@ -125,7 +125,7 @@ export default function InfrastructurePage({ token, clients }) {
       )}
 
       {activeTab === 'migration' && (
-        <MigrationWizard token={token} clients={clients} />
+        <MigrationWizard token={token} clients={clients} onComplete={() => setActiveTab('management')} />
       )}
 
       {activeTab === 'management' && (

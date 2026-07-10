@@ -410,6 +410,7 @@ export const migrationService = {
       // Register the client in the database automatically upon successful migration
       try {
         const existingClient = await query('SELECT * FROM clients WHERE domain = $1', [domain]);
+        let clientId = null;
         if (existingClient.rows.length === 0) {
           log(`Migración completada con éxito. Registrando automáticamente nuevo cliente para: ${domain}`);
           
@@ -423,14 +424,14 @@ export const migrationService = {
             }
           } catch {}
 
-          await clientService.createClient({
+          const createdClient = await clientService.createClient({
             name: clientName,
             company_name: clientName + ' Sp SpA',
             email: clientEmail,
             domain: domain,
             service_type: 'HOSTING_AND_MAINTENANCE',
             plan_interval: 'MONTHLY',
-            amount_per_period: 0, // Set to 0 CLP/USD so the plan can be configured manually later
+            amount_per_period: 89000.00,
             currency: 'CLP',
             status: 'ACTIVE',
             last_payment_date: new Date().toISOString().split('T')[0],
@@ -439,9 +440,16 @@ export const migrationService = {
             doc_root: `${config.infrastructure.clientSitesPath}/${domain}`,
             notes: `Cliente registrado automáticamente a través del motor de migración cPanel el ${new Date().toLocaleDateString('es-CL')}.`
           });
-          log(`Registro del cliente para ${domain} creado con éxito.`);
+          clientId = createdClient.id;
+          log(`Registro del cliente para ${domain} creado con éxito. ID: ${clientId}`);
         } else {
-          log(`El cliente con el dominio ${domain} ya existe en el sistema. Omitiendo duplicación.`);
+          clientId = existingClient.rows[0].id;
+          log(`El cliente con el dominio ${domain} ya existe en el sistema. Omitiendo duplicación. ID: ${clientId}`);
+        }
+
+        if (clientId) {
+          await query('UPDATE migrations SET client_id = $1 WHERE id = $2', [clientId, migrationId]);
+          log(`Relación migration.client_id actualizada exitosamente.`);
         }
       } catch (clientErr) {
         log(`Error registrando el cliente migrado: ${(clientErr as Error).message}`);

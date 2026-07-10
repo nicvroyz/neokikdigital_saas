@@ -21,7 +21,10 @@ export const databaseService = {
 
     try {
       // Create DB and user in containerized MySQL
-      const mysqlContainer = 'mysql-container'; // assumed running MySQL container name
+      const mysqlContainer = process.env.MYSQL_CONTAINER_NAME;
+      if (!mysqlContainer) {
+        throw new Error('Falta configurar la variable de entorno MYSQL_CONTAINER_NAME para el contenedor MySQL/MariaDB.');
+      }
       const rootPass = config.db.password; // root password
       
       const sqlCommands = `
@@ -49,7 +52,10 @@ export const databaseService = {
     }
 
     try {
-      const mysqlContainer = 'mysql-container';
+      const mysqlContainer = process.env.MYSQL_CONTAINER_NAME;
+      if (!mysqlContainer) {
+        throw new Error('Falta configurar la variable de entorno MYSQL_CONTAINER_NAME para el contenedor MySQL/MariaDB.');
+      }
       const rootPass = config.db.password;
       
       // Import the SQL dump directly into the container database
@@ -86,7 +92,10 @@ export const databaseService = {
     if (isDryRun()) return { success: true };
 
     try {
-      const mysqlContainer = 'mysql-container';
+      const mysqlContainer = process.env.MYSQL_CONTAINER_NAME;
+      if (!mysqlContainer) {
+        throw new Error('Falta configurar la variable de entorno MYSQL_CONTAINER_NAME para el contenedor MySQL/MariaDB.');
+      }
       const rootPass = config.db.password;
       const cmd = `docker exec -i ${mysqlContainer} mysql -u root -p${rootPass} -e "DROP DATABASE IF EXISTS \\\`${dbName}\\\`;"`;
       execSync(cmd);

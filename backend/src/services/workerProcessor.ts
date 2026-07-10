@@ -1,11 +1,14 @@
 import { query } from '../config/db';
-import { queueService, JobRecord } from './queueService';
+import { queueService } from './queueService';
 import { migrationService } from './migrationService';
 import { provisioningService } from './provisioningService';
 import { eventBus } from './eventBus';
 
 let workerActive = false;
 let workerInterval: NodeJS.Timeout | null = null;
+let loopRunning = false;
+let resolveTimeout: (() => void) | null = null;
+let workerLoopPromise: Promise<void> | null = null;
 
 function log(msg: string) {
   console.log(`[WORKER PROCESSOR] ${msg}`);
@@ -36,7 +39,10 @@ async function insertAuditLog(action: string, entity: string, clientId: string |
 export const workerProcessor = {
   async start(force = false) {
     if (workerActive && !force) return;
+    
+    const wasAlreadyRunning = loopRunning;
     workerActive = true;
+    loopRunning = true;
     log('Iniciando Procesador de Trabajos (Worker)...');
 
     // 1. Recover crashed jobs (PROCESSING status on server crash)
@@ -62,105 +68,128 @@ export const workerProcessor = {
       console.error('[WORKER PROCESSOR ERROR] Crash recovery failed', err);
     }
 
+    if (wasAlreadyRunning) {
+      return;
+    }
+
     // 2. Main execution loop
-    workerInterval = setInterval(async () => {
-      try {
-        const job = await queueService.getNextPendingJob();
-        if (!job) return;
-
-        log(`Procesando trabajo: ${job.job_type} (${job.id})`);
-        
-        // Increment attempts & set to PROCESSING
-        await queueService.incrementAttempts(job.id, job.attempts);
-
-        const startTime = Date.now();
-
+    workerLoopPromise = (async () => {
+      while (workerActive) {
         try {
-          if (job.job_type === 'MIGRATION') {
-            await insertAuditLog(
-              'MIGRATION_START',
-              'MIGRATION',
-              null,
-              { jobId: job.id, migrationId: job.reference_id, attempts: job.attempts + 1 },
-              'SUCCESS'
-            );
+          const job = await queueService.getNextPendingJob();
+          if (job) {
+            log(`Procesando trabajo: ${job.job_type} (${job.id})`);
             
-            await migrationService.executeMigration(job.reference_id);
-          } else if (job.job_type === 'PROVISION') {
-            await insertAuditLog(
-              'PROVISION_START',
-              'PROVISION',
-              null,
-              { jobId: job.id, provisionId: job.reference_id, attempts: job.attempts + 1 },
-              'SUCCESS'
-            );
+            // Increment attempts & set to PROCESSING
+            await queueService.incrementAttempts(job.id, job.attempts);
 
-            await provisioningService.executeProvision(job.reference_id);
-          }
+            const startTime = Date.now();
 
-          // Mark job as COMPLETED
-          await queueService.updateJobStatus(job.id, 'COMPLETED');
-          
-          const duration = Math.round((Date.now() - startTime) / 1000);
-          await insertAuditLog(
-            job.job_type === 'MIGRATION' ? 'MIGRATION_SUCCESS' : 'PROVISION_SUCCESS',
-            job.job_type,
-            null,
-            { jobId: job.id, duration_seconds: duration, attempts: job.attempts + 1 },
-            'SUCCESS'
-          );
+            try {
+              if (job.job_type === 'MIGRATION') {
+                await insertAuditLog(
+                  'MIGRATION_START',
+                  'MIGRATION',
+                  null,
+                  { jobId: job.id, migrationId: job.reference_id, attempts: job.attempts + 1 },
+                  'SUCCESS'
+                );
+                
+                await migrationService.executeMigration(job.reference_id);
+              } else if (job.job_type === 'PROVISION') {
+                await insertAuditLog(
+                  'PROVISION_START',
+                  'PROVISION',
+                  null,
+                  { jobId: job.id, provisionId: job.reference_id, attempts: job.attempts + 1 },
+                  'SUCCESS'
+                );
 
-          log(`Trabajo finalizado con éxito: ${job.id}`);
-        } catch (execErr) {
-          const errMsg = (execErr as Error).message || 'Error desconocido';
-          const duration = Math.round((Date.now() - startTime) / 1000);
+                await provisioningService.executeProvision(job.reference_id);
+              }
 
-          log(`Fallo en el trabajo ${job.id}: ${errMsg}`);
+              // Mark job as COMPLETED
+              await queueService.updateJobStatus(job.id, 'COMPLETED');
+              
+              const duration = Math.round((Date.now() - startTime) / 1000);
+              await insertAuditLog(
+                job.job_type === 'MIGRATION' ? 'MIGRATION_SUCCESS' : 'PROVISION_SUCCESS',
+                job.job_type,
+                null,
+                { jobId: job.id, duration_seconds: duration, attempts: job.attempts + 1 },
+                'SUCCESS'
+              );
 
-          // Retry logic
-          const nextAttempt = job.attempts + 1;
-          const isMigration = job.job_type === 'MIGRATION';
-          if (nextAttempt < job.max_attempts && !isMigration) {
-            log(`Reintentando trabajo ${job.id} (Intento ${nextAttempt + 1} de ${job.max_attempts})...`);
-            await queueService.updateJobStatus(job.id, 'PENDING', errMsg);
-            
-            await insertAuditLog(
-              job.job_type === 'MIGRATION' ? 'MIGRATION_RETRY' : 'PROVISION_RETRY',
-              job.job_type,
-              null,
-              { jobId: job.id, error: errMsg, attempt: nextAttempt, duration_seconds: duration },
-              'WARNING'
-            );
-          } else {
-            // Out of attempts, set to FAILED and run rollback
-            await queueService.updateJobStatus(job.id, 'FAILED', errMsg);
-            
-            await insertAuditLog(
-              job.job_type === 'MIGRATION' ? 'MIGRATION_FAILED' : 'PROVISION_FAILED',
-              job.job_type,
-              null,
-              { jobId: job.id, error: errMsg, duration_seconds: duration, attempts: nextAttempt },
-              'FAILED'
-            );
+              log(`Trabajo finalizado con éxito: ${job.id}`);
+            } catch (execErr) {
+              const errMsg = (execErr as Error).message || 'Error desconocido';
+              const duration = Math.round((Date.now() - startTime) / 1000);
 
-            if (job.job_type === 'MIGRATION') {
-              log(`Iniciando rollback automático para la migración: ${job.reference_id}`);
-              await migrationService.rollbackMigration(job.reference_id);
+              log(`Fallo en el trabajo ${job.id}: ${errMsg}`);
+
+              // Retry logic
+              const nextAttempt = job.attempts + 1;
+              const isMigration = job.job_type === 'MIGRATION';
+              if (nextAttempt < job.max_attempts && !isMigration) {
+                log(`Reintentando trabajo ${job.id} (Intento ${nextAttempt + 1} de ${job.max_attempts})...`);
+                await queueService.updateJobStatus(job.id, 'PENDING', errMsg);
+                
+                await insertAuditLog(
+                  job.job_type === 'MIGRATION' ? 'MIGRATION_RETRY' : 'PROVISION_RETRY',
+                  job.job_type,
+                  null,
+                  { jobId: job.id, error: errMsg, attempt: nextAttempt, duration_seconds: duration },
+                  'WARNING'
+                );
+              } else {
+                // Out of attempts, set to FAILED and run rollback
+                await queueService.updateJobStatus(job.id, 'FAILED', errMsg);
+                
+                await insertAuditLog(
+                  job.job_type === 'MIGRATION' ? 'MIGRATION_FAILED' : 'PROVISION_FAILED',
+                  job.job_type,
+                  null,
+                  { jobId: job.id, error: errMsg, duration_seconds: duration, attempts: nextAttempt },
+                  'FAILED'
+                );
+
+                if (job.job_type === 'MIGRATION') {
+                  log(`Iniciando rollback automático para la migración: ${job.reference_id}`);
+                  await migrationService.rollbackMigration(job.reference_id);
+                }
+              }
             }
           }
+        } catch (err) {
+          console.error('[WORKER PROCESSOR ERROR] Loop execution failed', err);
         }
-      } catch (err) {
-        console.error('[WORKER PROCESSOR ERROR] Loop execution failed', err);
+
+        // Wait approximately 3 seconds before next iteration
+        if (workerActive) {
+          await new Promise<void>((resolve) => {
+            resolveTimeout = resolve;
+            workerInterval = setTimeout(() => {
+              resolve();
+            }, 3000);
+          });
+          resolveTimeout = null;
+          workerInterval = null;
+        }
       }
-    }, 3000);
+      loopRunning = false;
+    })();
   },
 
   stop() {
+    workerActive = false;
     if (workerInterval) {
-      clearInterval(workerInterval);
+      clearTimeout(workerInterval);
       workerInterval = null;
-      workerActive = false;
-      log('Procesador de Trabajos detenido.');
     }
+    if (resolveTimeout) {
+      resolveTimeout();
+      resolveTimeout = null;
+    }
+    log('Procesador de Trabajos detenido.');
   }
 };

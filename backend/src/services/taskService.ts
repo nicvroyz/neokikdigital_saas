@@ -62,11 +62,21 @@ export const taskService = {
   },
 
   async updateTask(id: string, data: Partial<TaskData>) {
+    const allowedColumns = new Set([
+      'project_id',
+      'title',
+      'description',
+      'status',
+      'priority',
+      'estimated_hours',
+      'due_date'
+    ]);
+
     const fields: string[] = [];
     const params: any[] = [id];
 
     Object.keys(data).forEach((key) => {
-      if (key !== 'id' && data[key as keyof TaskData] !== undefined) {
+      if (allowedColumns.has(key) && data[key as keyof TaskData] !== undefined) {
         params.push(data[key as keyof TaskData]);
         fields.push(`${key} = $${params.length}`);
       }

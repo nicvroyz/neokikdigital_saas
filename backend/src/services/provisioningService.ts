@@ -3,6 +3,7 @@ import { dockerService } from './dockerService';
 import { databaseService } from './databaseService';
 import { sslService } from './sslService';
 import { mailcowService } from './mailcowService';
+import crypto from 'crypto';
 
 function log(msg: string) {
   console.log(`[PROVISIONING SERVICE] ${msg}`);
@@ -50,7 +51,7 @@ export const provisioningService = {
         // Create DB
         const dbName = `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
         const dbUser = `user_${domain.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 10)}`;
-        const dbPass = `Pass_${Math.random().toString(36).substring(2, 10)}!`;
+        const dbPass = `Pass_${crypto.randomBytes(4).toString('hex')}!`;
         
         await databaseService.createDatabase(dbName, dbUser, dbPass);
         
@@ -73,7 +74,7 @@ export const provisioningService = {
             await mailcowService.createMailbox({
               local_part: mailboxName,
               domain,
-              password: `Pass_${Math.random().toString(36).substring(2, 10)}!`,
+              password: `Pass_${crypto.randomBytes(4).toString('hex')}!`,
               quota: 1024
             });
           }

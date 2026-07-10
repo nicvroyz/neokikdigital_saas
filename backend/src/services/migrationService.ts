@@ -1,5 +1,5 @@
 import { query } from '../config/db';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { config } from '../config/env';
 import { backupAnalyzerService } from './backupAnalyzerService';
 import { dnsAnalyzerService } from './dnsAnalyzerService';
@@ -19,7 +19,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { AsyncLocalStorage } from 'async_hooks';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes } from 'crypto';
 
 export const correlationStorage = new AsyncLocalStorage<string>();
 const executedRollbacks = new Set<string>();
@@ -162,8 +162,10 @@ export const migrationService = {
         // Step 4: Create MySQL Database / User / Import SQL (Rule 7)
         const dbName = `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
         const dbUser = `user_${domain.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 10)}`;
-        const dbPass = `Pass_${Math.random().toString(36).substring(2, 10)}!`;
+        const dbPass = `Pass_${randomBytes(4).toString('hex')}!`;
         const dbConfig = { dbName, dbUser, dbPass, dbHost: process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql' };
+
+        log(`Credenciales generadas: DB_HOST=${dbConfig.dbHost}, DB_NAME=${dbConfig.dbName}, DB_USER=${dbConfig.dbUser}, DB_PASSWORD=********`);
 
         try {
           analysisReport = typeof mig.analysis_report === 'string' ? JSON.parse(mig.analysis_report) : mig.analysis_report;
@@ -200,25 +202,25 @@ export const migrationService = {
           await this.logStep(migrationId, 'database:restoring', 'No se detectaron bases de datos. Omitiendo paso de base de datos.', 'SUCCESS', 55);
         }
 
-        // Step 5: Crear contenedor
-        log('Paso 5: Creando contenedor Docker...');
-        await this.logStep(migrationId, 'container:creating', 'Creando y enlazando contenedor Docker con volumenes...', 'RUNNING', 60);
+        // Step 5: Configurar wp-config.php (Rule 6)
+        if (plugin && typeof plugin.configureDatabaseConfig === 'function') {
+          log('Paso 5: Configurando archivos de conexión a base de datos...');
+          await this.logStep(migrationId, 'plugin:executing', 'Configurando archivos de conexión a base de datos (wp-config)...', 'RUNNING', 60);
+          await plugin.configureDatabaseConfig(docRoot, dbConfig);
+        }
+
+        // Step 6: Crear contenedor
+        log('Paso 6: Creando contenedor Docker...');
+        await this.logStep(migrationId, 'container:creating', 'Creando y enlazando contenedor Docker con volumenes...', 'RUNNING', 65);
         await dockerService.createContainer(domain, mig.detected_project_type || 'WORDPRESS', '8.2', dbName, dbUser, dbPass);
         await query('UPDATE migrations SET rollback_step = \'REMOVE_CONTAINER\' WHERE id = $1', [migrationId]);
 
-        // Step 6: Esperar que el contenedor esté listo (Rule 3)
+        // Step 7: Esperar que el contenedor esté listo (Rule 3)
         const containerName = domain.replace(/[^a-zA-Z0-9]/g, '_');
-        log(`Paso 6: Esperando que el contenedor ${containerName} esté listo...`);
-        await this.logStep(migrationId, 'container:creating', 'Esperando que los servicios internos del contenedor estén listos...', 'RUNNING', 65);
-        await this.waitForContainerReady(containerName, mig.detected_project_type === 'WORDPRESS');
-        await this.logStep(migrationId, 'container:creating', 'Contenedor Docker iniciado y enlazado correctamente.', 'SUCCESS', 70);
-
-        // Step 7: Configurar wp-config.php (Rule 6)
-        if (plugin && typeof plugin.configureDatabaseConfig === 'function') {
-          log('Paso 7: Configurando archivos de conexión a base de datos...');
-          await this.logStep(migrationId, 'plugin:executing', 'Configurando archivos de conexión a base de datos (wp-config)...', 'RUNNING', 72);
-          await plugin.configureDatabaseConfig(docRoot, dbConfig);
-        }
+        log(`Paso 7: Esperando que el contenedor ${containerName} esté listo...`);
+        await this.logStep(migrationId, 'container:creating', 'Esperando que los servicios internos del contenedor estén listos...', 'RUNNING', 70);
+        await dockerService.waitForContainerReady(containerName, mig.detected_project_type === 'WORDPRESS');
+        await this.logStep(migrationId, 'container:creating', 'Contenedor Docker iniciado y enlazado correctamente.', 'SUCCESS', 72);
 
         // Step 8: Detectar dominio original (Rule 4)
         let originalDomain: string | null = null;
@@ -244,9 +246,9 @@ export const migrationService = {
             
             if (!isDryRun) {
               try {
-                execSync(`docker exec ${containerName} wp search-replace "${cleanOriginal}" "${cleanTarget}" --all-tables --allow-root`, { timeout: 120000 });
-                execSync(`docker exec ${containerName} wp search-replace "http://${cleanOriginal}" "https://${cleanTarget}" --all-tables --allow-root`, { timeout: 120000 });
-                execSync(`docker exec ${containerName} wp search-replace "https://${cleanOriginal}" "https://${cleanTarget}" --all-tables --allow-root`, { timeout: 120000 });
+                execFileSync('docker', ['exec', containerName, 'wp', 'search-replace', cleanOriginal, cleanTarget, '--all-tables', '--allow-root'], { timeout: 120000 });
+                execFileSync('docker', ['exec', containerName, 'wp', 'search-replace', `http://${cleanOriginal}`, `https://${cleanTarget}`, '--all-tables', '--allow-root'], { timeout: 120000 });
+                execFileSync('docker', ['exec', containerName, 'wp', 'search-replace', `https://${cleanOriginal}`, `https://${cleanTarget}`, '--all-tables', '--allow-root'], { timeout: 120000 });
               } catch (srErr) {
                 log(`Advertencia en wp search-replace: ${(srErr as Error).message}`);
               }
@@ -259,7 +261,7 @@ export const migrationService = {
 
           if (!isDryRun) {
             try {
-              execSync(`docker exec ${containerName} wp cache flush --allow-root`, { timeout: 30000 });
+              execFileSync('docker', ['exec', containerName, 'wp', 'cache', 'flush', '--allow-root'], { timeout: 30000 });
             } catch (cfErr) {
               log(`Advertencia en wp cache flush: ${(cfErr as Error).message}`);
             }
@@ -342,15 +344,15 @@ export const migrationService = {
               const sourceMaildir = path.join(destDir, 'mail', acc.local_part);
               if (fs.existsSync(sourceMaildir) && !isDryRunMode) {
                 try {
-                  const checkDovecot = execSync(`docker ps -q -f name=dovecot-mailcow`).toString().trim();
+                  const checkDovecot = execFileSync('docker', ['ps', '-q', '-f', 'name=dovecot-mailcow']).toString().trim();
                   if (checkDovecot) {
                     const destMaildir = `/var/vmail/${domain}/${acc.local_part}/Maildir/`;
-                    execSync(`docker exec -i dovecot-mailcow mkdir -p ${destMaildir}`);
-                    execSync(`docker cp ${sourceMaildir}/. dovecot-mailcow:${destMaildir}`);
-                    execSync(`docker exec -i dovecot-mailcow chown -R vmail:vmail /var/vmail/${domain}/${acc.local_part}`);
+                    execFileSync('docker', ['exec', '-i', 'dovecot-mailcow', 'mkdir', '-p', destMaildir]);
+                    execFileSync('docker', ['cp', `${sourceMaildir}/.`, `dovecot-mailcow:${destMaildir}`]);
+                    execFileSync('docker', ['exec', '-i', 'dovecot-mailcow', 'chown', '-R', 'vmail:vmail', `/var/vmail/${domain}/${acc.local_part}`]);
                     
-                    const count = execSync(`docker exec -i dovecot-mailcow find ${destMaildir} -type f | wc -l`).toString().trim();
-                    const destCount = parseInt(count, 10) || 0;
+                    const findOut = execFileSync('docker', ['exec', '-i', 'dovecot-mailcow', 'find', destMaildir, '-type f'], { stdio: 'pipe' }).toString().trim();
+                    const destCount = findOut.split('\n').filter(Boolean).length;
                     totalDestMessages += destCount;
                     migrationResults.push(`${email}: ${destCount} de ${acc.messageCount} mensajes copiados`);
                   } else {
@@ -408,7 +410,7 @@ export const migrationService = {
         if (plugin && typeof plugin.runHealthCheck === 'function') {
           healthPassed = await plugin.runHealthCheck(domain, containerName, docRoot);
         } else {
-          const inspectStatus = execSync(`docker inspect -f "{{.State.Running}}" ${containerName}`).toString().trim();
+          const inspectStatus = execFileSync('docker', ['inspect', '-f', '{{.State.Running}}', containerName]).toString().trim();
           healthPassed = inspectStatus === 'true';
         }
 
@@ -506,44 +508,6 @@ export const migrationService = {
     });
   },
 
-  async waitForContainerReady(containerName: string, isWordpress = true): Promise<void> {
-    const isDryRun = !!config.migration.dryRun;
-    if (isDryRun) return;
-
-    const maxWaitMs = 60000; // 60 seconds
-    const intervalMs = 2000; // poll every 2 seconds
-    const startTime = Date.now();
-
-    log(`Esperando a que el contenedor ${containerName} esté listo (WordPress: ${isWordpress})...`);
-
-    while (Date.now() - startTime < maxWaitMs) {
-      try {
-        const inspect = execSync(`docker inspect -f "{{.State.Running}}" ${containerName}`).toString().trim();
-        if (inspect === 'true') {
-          if (isWordpress) {
-            const info = execSync(`docker exec ${containerName} wp --info --allow-root`, { timeout: 3000, stdio: 'pipe' }).toString().trim();
-            if (info.includes('PHP version') && info.includes('WP-CLI')) {
-              log(`Contenedor WordPress ${containerName} está listo.`);
-              return;
-            }
-          } else {
-            // General PHP check
-            const info = execSync(`docker exec ${containerName} php -v`, { timeout: 3000, stdio: 'pipe' }).toString().trim();
-            if (info.includes('PHP')) {
-              log(`Contenedor PHP ${containerName} está listo.`);
-              return;
-            }
-          }
-        }
-      } catch (err) {
-        log(`Contenedor ${containerName} no está listo todavía...`);
-      }
-      await new Promise(resolve => setTimeout(resolve, intervalMs));
-    }
-
-    throw new Error(`Timeout: El contenedor ${containerName} no se inició correctamente.`);
-  },
-
   async logStep(migrationId: string, step: string, message: string, status: 'SUCCESS' | 'FAILED' | 'RUNNING', percentage: number) {
     // Check if the step log already exists to update it or create new
     const existing = await query('SELECT * FROM migration_logs WHERE migration_id = $1 AND step = $2', [migrationId, step]);
@@ -586,8 +550,11 @@ export const migrationService = {
     const rollbackStep = mig.rollback_step;
     const destDir = path.join(config.infrastructure.storagePath, 'migrations', 'extracted', migrationId);
 
+    const keepContainers = process.env.KEEP_FAILED_CONTAINERS === 'true';
+    const keepDatabases = process.env.KEEP_FAILED_DATABASES === 'true';
+
     try {
-      if (rollbackStep === 'REMOVE_CONTAINER' || rollbackStep === 'DROP_DATABASE' || rollbackStep === 'CLEANUP_EXTRACTED') {
+      if (!keepContainers && rollbackStep === 'REMOVE_CONTAINER') {
         log('Rollback: Eliminando contenedor Docker...');
         try {
           if (domain) {
@@ -598,7 +565,7 @@ export const migrationService = {
         }
       }
       
-      if (rollbackStep === 'DROP_DATABASE') {
+      if (!keepDatabases && (rollbackStep === 'REMOVE_CONTAINER' || rollbackStep === 'DROP_DATABASE')) {
         log('Rollback: Eliminando base de datos MySQL...');
         try {
           if (domain) {

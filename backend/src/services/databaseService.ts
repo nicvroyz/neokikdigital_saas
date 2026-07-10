@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { config } from '../config/env';
 import fs from 'fs';
 import path from 'path';
@@ -13,10 +13,19 @@ function log(msg: string) {
   console.log(`[DATABASE SERVICE] ${msg}`);
 }
 
+function validateMySQLSafe(...inputs: string[]) {
+  const safeRegex = /^[a-zA-Z0-9_.-]+$/;
+  for (const input of inputs) {
+    if (!input || !safeRegex.test(input)) {
+      throw new Error(`Entrada MySQL insegura: ${input}`);
+    }
+  }
+}
+
 async function sanitizeSQLDump(srcPath: string, destPath: string): Promise<void> {
   const readStream = fs.createReadStream(srcPath);
   const writeStream = fs.createWriteStream(destPath);
-  
+
   const rl = readline.createInterface({
     input: readStream,
     crlfDelay: Infinity
@@ -37,20 +46,24 @@ async function sanitizeSQLDump(srcPath: string, destPath: string): Promise<void>
     if (line.includes('DEFINER=')) {
       cleanLine = line.replace(/DEFINER\s*=\s*[`"']?[a-zA-Z0-9_-]+[`"']?@[`"']?[a-zA-Z0-9_*%-]+[`"']?/gi, '');
     }
-    
-    writeStream.write(cleanLine + '\n');
+
+    if (!writeStream.write(cleanLine + '\n')) {
+      await new Promise<void>(resolve => writeStream.once('drain', resolve));
+    }
   }
-  
+
   writeStream.end();
 }
 
 export const databaseService = {
   async createDatabase(dbName: string, dbUser: string, dbPass: string): Promise<any> {
     log(`Creando Base de Datos: ${dbName} y usuario: ${dbUser}`);
-    
+
     if (isDryRun()) {
       return { success: true, dbName, dbUser };
     }
+
+    validateMySQLSafe(dbName, dbUser);
 
     try {
       const mysqlContainer = process.env.MYSQL_CONTAINER_NAME;
@@ -58,30 +71,45 @@ export const databaseService = {
         throw new Error('Falta configurar la variable de entorno MYSQL_CONTAINER_NAME para el contenedor MySQL/MariaDB.');
       }
       const rootPass = config.db.password; // root password
-      
+
       const sqlCommands = `
-        CREATE DATABASE IF NOT EXISTS \\\`${dbName}\\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+        CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
         CREATE USER IF NOT EXISTS '${dbUser}'@'%' IDENTIFIED BY '${dbPass}';
-        GRANT ALL PRIVILEGES ON \\\`${dbName}\\\`.* TO '${dbUser}'@'%';
+        ALTER USER '${dbUser}'@'%' IDENTIFIED BY '${dbPass}';
+        GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'%';
         FLUSH PRIVILEGES;
       `;
-      
-      const cmd = `docker exec -i ${mysqlContainer} mysql -u root -p${rootPass} -e "${sqlCommands}"`;
-      execSync(cmd);
-      
+
+      execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, '-e', sqlCommands]);
+
+      // Validate user existence
+      const checkUserOut = execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, '-e', `SELECT User FROM mysql.user WHERE User = '${dbUser}';`], { stdio: 'pipe' }).toString().trim();
+      if (!checkUserOut.includes(dbUser)) {
+        throw new Error(`El usuario ${dbUser} no existe en la base de datos después de la creación.`);
+      }
+
+      // Validate user permissions over the created database
+      const checkGrantsOut = execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, '-e', `SHOW GRANTS FOR '${dbUser}'@'%';`], { stdio: 'pipe' }).toString().trim();
+      if (!checkGrantsOut.includes(dbName)) {
+        throw new Error(`El usuario ${dbUser} no tiene los privilegios otorgados sobre la base de datos ${dbName}.`);
+      }
+
+      log(`Database created: name=${dbName} user=${dbUser}`);
       return { success: true, dbName, dbUser };
     } catch (err) {
       console.error('[DATABASE SERVICE ERROR] Failed to create database', err);
-      throw new Error(`Error en DatabaseService: ${(err as Error).message}`);
+      throw new Error(`No se pudo crear la base de datos MariaDB/MySQL ${dbName} o el usuario ${dbUser}: ${(err as Error).message}`);
     }
   },
 
   async importSQLDump(dbName: string, dumpFilePath: string, projectType?: string): Promise<any> {
     log(`Importando SQL dump: ${dumpFilePath} en base de datos: ${dbName}`);
-    
+
     if (isDryRun()) {
       return { success: true };
     }
+
+    validateMySQLSafe(dbName);
 
     const mysqlContainer = process.env.MYSQL_CONTAINER_NAME;
     if (!mysqlContainer) {
@@ -92,15 +120,13 @@ export const databaseService = {
     // 1. Pre-Import Backup
     let dbExists = false;
     let tablesCount = 0;
-    
+
     try {
-      const checkDbCmd = `docker exec -i ${mysqlContainer} mysql -u root -p${rootPass} -e "SHOW DATABASES LIKE '${dbName}';"`;
-      const dbResult = execSync(checkDbCmd, { stdio: 'pipe' }).toString().trim();
+      const dbResult = execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, '-e', `SHOW DATABASES LIKE '${dbName}';`], { stdio: 'pipe' }).toString().trim();
       dbExists = dbResult.toLowerCase().includes(dbName.toLowerCase());
-      
+
       if (dbExists) {
-        const checkTablesCmd = `docker exec -i ${mysqlContainer} mysql -u root -p${rootPass} ${dbName} -N -e "SHOW TABLES;"`;
-        const tablesResult = execSync(checkTablesCmd, { stdio: 'pipe' }).toString().trim();
+        const tablesResult = execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, dbName, '-N', '-e', 'SHOW TABLES;'], { stdio: 'pipe' }).toString().trim();
         tablesCount = tablesResult.split('\n').filter(Boolean).length;
       }
     } catch (err) {
@@ -115,8 +141,9 @@ export const databaseService = {
       }
       const backupFile = path.join(backupsDir, `before-import-${dbName}-${Date.now()}.sql`);
       try {
-        const dumpCmd = `docker exec -i ${mysqlContainer} mysqldump -u root -p${rootPass} ${dbName} > "${backupFile}"`;
-        execSync(dumpCmd);
+        const backupFd = fs.openSync(backupFile, 'w');
+        execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysqldump', '-u', 'root', `-p${rootPass}`, dbName], { stdio: ['ignore', backupFd, 'ignore'] });
+        fs.closeSync(backupFd);
         log(`Copia de seguridad creada exitosamente en: ${backupFile}`);
       } catch (dumpErr) {
         log(`Advertencia: Falló la creación de la copia de seguridad. Detalle: ${(dumpErr as Error).message}`);
@@ -135,7 +162,7 @@ export const databaseService = {
         const gzip = zlib.createGunzip();
         const source = fs.createReadStream(dumpFilePath);
         const destination = fs.createWriteStream(decompressedPath);
-        
+
         await new Promise<void>((resolve, reject) => {
           source.pipe(gzip).pipe(destination).on('finish', resolve).on('error', reject);
         });
@@ -148,13 +175,13 @@ export const databaseService = {
       await sanitizeSQLDump(activeSqlPath, sanitizedPath);
 
       // 4. Import the sanitized SQL dump
-      const cmd = `docker exec -i ${mysqlContainer} mysql -u root -p${rootPass} ${dbName} < "${sanitizedPath}"`;
-      execSync(cmd);
-      
+      const importFd = fs.openSync(sanitizedPath, 'r');
+      execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, dbName], { stdio: [importFd, 'ignore', 'ignore'] });
+      fs.closeSync(importFd);
+
       log(`Validando importación para la base de datos: ${dbName}...`);
-      const checkCmd = `docker exec -i ${mysqlContainer} mysql -u root -p${rootPass} ${dbName} -e "SHOW TABLES;"`;
-      const stdout = execSync(checkCmd).toString().trim();
-      
+      const stdout = execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, dbName, '-e', 'SHOW TABLES;'], { stdio: 'pipe' }).toString().trim();
+
       const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean);
       if (lines.length <= 1) { // SHOW TABLES outputs a header line, so length <= 1 means 0 tables!
         throw new Error('La base de datos importada no contiene tablas.');
@@ -167,19 +194,19 @@ export const databaseService = {
           throw new Error("No se encontraron tablas de WordPress (wp_*) en la base de datos importada.");
         }
       }
-      
+
       log('Validación de base de datos completada exitosamente.');
       return { success: true };
     } catch (err) {
       console.error('[DATABASE SERVICE ERROR] Failed to import SQL', err);
-      throw new Error(`Error al importar SQL dump: ${(err as Error).message}`);
+      throw new Error(`No se pudo importar el SQL dump en ${dbName}: ${(err as Error).message}`);
     } finally {
       // Clean up temp files
       if (decompressedPath && fs.existsSync(decompressedPath)) {
-        try { fs.unlinkSync(decompressedPath); } catch {}
+        try { fs.unlinkSync(decompressedPath); } catch { }
       }
       if (sanitizedPath && fs.existsSync(sanitizedPath)) {
-        try { fs.unlinkSync(sanitizedPath); } catch {}
+        try { fs.unlinkSync(sanitizedPath); } catch { }
       }
     }
   },
@@ -188,14 +215,15 @@ export const databaseService = {
     log(`Eliminando base de datos: ${dbName}`);
     if (isDryRun()) return { success: true };
 
+    validateMySQLSafe(dbName);
+
     try {
       const mysqlContainer = process.env.MYSQL_CONTAINER_NAME;
       if (!mysqlContainer) {
         throw new Error('Falta configurar la variable de entorno MYSQL_CONTAINER_NAME para el contenedor MySQL/MariaDB.');
       }
       const rootPass = config.db.password;
-      const cmd = `docker exec -i ${mysqlContainer} mysql -u root -p${rootPass} -e "DROP DATABASE IF EXISTS \\\`${dbName}\\\`;"`;
-      execSync(cmd);
+      execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, '-e', `DROP DATABASE IF EXISTS \`${dbName}\`;`]);
       return { success: true };
     } catch (err) {
       throw new Error(`Error al eliminar base de datos: ${(err as Error).message}`);

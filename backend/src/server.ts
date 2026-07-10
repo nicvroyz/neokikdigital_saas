@@ -91,6 +91,6 @@ schedulerService.init();
 app.listen(config.port, () => {
   console.log(`=======================================================`);
   console.log(`🚀 Neokik Digital SaaS Backend + Infrastructure Engine running on port ${config.port}`);
-  console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`   Environment: ${process.env.NODE_ENV || 'production'}`);
   console.log(`=======================================================`);
 });

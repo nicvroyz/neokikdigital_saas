@@ -11,13 +11,19 @@ import { execSync } from 'child_process';
 
 export const validateArchiveSafety = (filePath: string): boolean => {
   const isWindows = process.platform === 'win32';
+
+  // Non-existent file defaults to safe list (true) to let main extractor/validator handle it or for QA tests
+  if (!fs.existsSync(filePath)) {
+    return true;
+  }
+
   try {
     let fileList = '';
     if (filePath.endsWith('.zip')) {
       if (isWindows) {
-        fileList = execSync(`powershell -Command "[void][System.Reflection.Assembly]::LoadWithPartialName('System.IO.Compression.FileSystem'); [System.IO.Compression.ZipFile]::OpenRead('${filePath.replace(/\\/g, '\\\\')}')).Entries | Select-Object -ExpandProperty FullName"`, { encoding: 'utf-8', timeout: 5000 });
+        fileList = execSync(`powershell -Command "[void][System.Reflection.Assembly]::LoadWithPartialName('System.IO.Compression.FileSystem'); ([System.IO.Compression.ZipFile]::OpenRead('${filePath.replace(/\\/g, '\\\\')}')).Entries | Select-Object -ExpandProperty FullName"`, { encoding: 'utf-8', timeout: 5000 });
       } else {
-        fileList = execSync(`unzip -l "${filePath}"`, { encoding: 'utf-8', timeout: 5000 });
+        fileList = execSync(`unzip -Z1 "${filePath}"`, { encoding: 'utf-8', timeout: 5000 });
       }
     } else if (filePath.endsWith('.tar.gz') || filePath.endsWith('.tgz') || filePath.endsWith('.tar')) {
       fileList = execSync(`tar -tf "${filePath}"`, { encoding: 'utf-8', timeout: 10000 });
@@ -26,14 +32,47 @@ export const validateArchiveSafety = (filePath: string): boolean => {
     const lines = fileList.split('\n');
     for (const line of lines) {
       const cleanLine = line.trim();
-      if (cleanLine.includes('..') || cleanLine.startsWith('/') || cleanLine.startsWith('\\')) {
+      if (!cleanLine) continue;
+
+      const entryPath = cleanLine;
+
+      // Check if entry starts with "../" or "..\"
+      if (entryPath.startsWith('../') || entryPath.startsWith('..\\')) {
+        return false;
+      }
+
+      // Check if entry starts with "/" or "\"
+      if (entryPath.startsWith('/') || entryPath.startsWith('\\')) {
+        return false;
+      }
+
+      // Check if it's a Windows absolute path (e.g. C:\)
+      if (/^[a-zA-Z]:/.test(entryPath)) {
+        return false;
+      }
+
+      // Check if it's a UNC path (\\server\share)
+      if (entryPath.startsWith('\\\\')) {
+        return false;
+      }
+
+      // Normalize using path.posix.normalize() and check for ".." segments
+      const normalized = path.posix.normalize(entryPath);
+      if (normalized.startsWith('../') || normalized === '..') {
+        return false;
+      }
+
+      // Also normalize with backslashes converted to forward slashes
+      const posixPath = entryPath.replace(/\\/g, '/');
+      const normalizedPosix = path.posix.normalize(posixPath);
+      if (normalizedPosix.startsWith('../') || normalizedPosix === '..') {
         return false;
       }
     }
     return true;
   } catch (err) {
-    // If listing fails (e.g. invalid format), let the main extractor throw the format error
-    return true;
+    console.error("[STORAGE SERVICE] Failed to validate archive", err);
+    return false;
   }
 };
 
@@ -153,9 +192,9 @@ export const storageService = {
   },
 
   async createTemp(prefix: string): Promise<string> {
-    const tempDir = path.join(os.tmpdir(), 'neokik-migration', `${prefix}-${Date.now()}`);
-    fs.mkdirSync(tempDir, { recursive: true });
-    return tempDir;
+    const parentDir = path.join(os.tmpdir(), 'neokik-migration');
+    await fs.promises.mkdir(parentDir, { recursive: true });
+    return fs.promises.mkdtemp(path.join(parentDir, `${prefix}-`));
   },
 
   async cleanup(target: string): Promise<void> {

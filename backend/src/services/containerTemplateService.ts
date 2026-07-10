@@ -18,11 +18,10 @@ ${domain} {
     `.trim();
   },
 
-  generateDockerComposeFile(domain: string, projectType: string, phpVersion: string, dbName: string, dbUser: string, dbPass: string): string {
+  generateDockerComposeFile(domain: string, projectType: string, phpVersion: string): string {
     log(`Generando docker-compose.yml para: ${domain} (Tipo: ${projectType})`);
     const containerName = domain.replace(/[^a-zA-Z0-9]/g, '_');
     const image = projectType === 'WORDPRESS' ? 'neokik-wordpress:latest' : `php:${phpVersion}-fpm-alpine`;
-    const mysqlContainer = process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql';
 
     return `
 version: '3.8'
@@ -38,10 +37,13 @@ services:
       - caddy_proxy
       - neokikdigital_saas_default
     environment:
-      - WORDPRESS_DB_HOST=${mysqlContainer}
-      - WORDPRESS_DB_NAME=${dbName}
-      - WORDPRESS_DB_USER=${dbUser}
-      - WORDPRESS_DB_PASSWORD=${dbPass}
+      WORDPRESS_DB_HOST: \${WORDPRESS_DB_HOST}
+      WORDPRESS_DB_NAME: \${WORDPRESS_DB_NAME}
+      WORDPRESS_DB_USER: \${WORDPRESS_DB_USER}
+      WORDPRESS_DB_PASSWORD: \${WORDPRESS_DB_PASSWORD}
+      MYSQL_DATABASE: \${MYSQL_DATABASE}
+      MYSQL_USER: \${MYSQL_USER}
+      MYSQL_PASSWORD: \${MYSQL_PASSWORD}
     labels:
       - "caddy=${domain}"
       - "caddy.root=*/var/www/html"

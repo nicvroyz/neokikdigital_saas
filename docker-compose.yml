@@ -33,6 +33,9 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME:-neokik_saas}
       JWT_SECRET: ${JWT_SECRET}
+      MIGRATION_DRY_RUN: ${MIGRATION_DRY_RUN:-true}
+      MAILCOW_API_URL: ${MAILCOW_API_URL}
+      MAILCOW_API_KEY: ${MAILCOW_API_KEY}
       CLIENT_SITES_PATH: /srv/neokik/sites
       BACKUP_PATH: /srv/neokik/backups
       STORAGE_PATH: /srv/neokik/storage

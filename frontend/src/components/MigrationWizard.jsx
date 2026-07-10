@@ -55,6 +55,75 @@ export default function MigrationWizard({ token, clients, onComplete }) {
     };
   }, []);
 
+  // Restore active migration if present in localStorage
+  useEffect(() => {
+    const activeId = localStorage.getItem('activeMigrationId');
+    if (activeId && token) {
+      const restoreMigration = async () => {
+        try {
+          const res = await fetch(`/api/infrastructure/migrations/${activeId}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          if (!res.ok) {
+            localStorage.removeItem('activeMigrationId');
+            return;
+          }
+          
+          const migration = await res.json();
+          setMigrationId(migration.id);
+          
+          let report = null;
+          if (migration.analysis_report) {
+            report = typeof migration.analysis_report === 'string'
+              ? JSON.parse(migration.analysis_report)
+              : migration.analysis_report;
+            setAnalysisReport(report);
+          }
+
+          if (migration.logs && Array.isArray(migration.logs)) {
+            setMigrationLogs(migration.logs.map(log => ({
+              id: `log-${Date.now()}-${Math.random()}`,
+              step: log.step,
+              message: log.message,
+              status: log.status,
+              percentage: log.percentage,
+              startedAt: log.started_at,
+              completedAt: log.completed_at
+            })));
+          }
+
+          if (migration.status === 'MIGRATING') {
+            const startTime = migration.started_at ? new Date(migration.started_at).getTime() : Date.now();
+            listenToMigrationStream(migration.id, startTime);
+          } else if (migration.status === 'FAILED') {
+            setOverallStatus('FAILED');
+            setIsExecuting(false);
+            setCurrentStep(4);
+            setErrorMsg(migration.error_log || 'La migración falló. El motor de autorrecuperación revertirá los cambios.');
+          } else if (migration.status === 'COMPLETED') {
+            localStorage.removeItem('activeMigrationId');
+          } else if (report) {
+            if (migration.simulation_report) {
+              const simReport = typeof migration.simulation_report === 'string'
+                ? JSON.parse(migration.simulation_report)
+                : migration.simulation_report;
+              setSimulationReport(simReport);
+            } else {
+              runSimulation(migration.id);
+            }
+            setCurrentStep(3);
+          }
+        } catch (err) {
+          console.error('Error restoring migration:', err);
+        }
+      };
+      restoreMigration();
+    }
+  }, [token]);
+
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
     if (file) {
@@ -156,6 +225,7 @@ export default function MigrationWizard({ token, clients, onComplete }) {
           const data = JSON.parse(xhr.responseText);
           const mig = data.migrations[0];
           setMigrationId(mig.id);
+          localStorage.setItem('activeMigrationId', mig.id);
           
           // Move to analysis
           setCurrentStep(2);
@@ -254,6 +324,184 @@ export default function MigrationWizard({ token, clients, onComplete }) {
     }
   };
 
+  const listenToMigrationStream = (migId, startTimestamp) => {
+    setIsExecuting(true);
+    setCurrentStep(4);
+    setOverallStatus('RUNNING');
+
+    // Start timing
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      const diff = Math.floor((Date.now() - startTimestamp) / 1000);
+      const mins = Math.floor(diff / 60);
+      const secs = diff % 60;
+      setElapsedTime(mins > 0 ? `${mins}m ${secs}s` : `${secs}s`);
+    }, 1000);
+
+    // Mutual exclusion references
+    let eventSource = null;
+    let fallbackTimer = null;
+    let pollingIntervalId = null;
+
+    // Idempotent logs state updater with step filtering and deduplication
+    const updateLogs = (data) => {
+      if (!data.step) return;
+      const stepStr = String(data.step);
+      // Ignore initial metadata, analysis and simulation steps
+      if (stepStr.includes('Z') || stepStr.includes(':') || stepStr === 'analyze_backup' || stepStr === 'simulate_migration') {
+        return;
+      }
+
+      setMigrationLogs(prev => {
+        const idx = prev.findIndex(l => l.step === stepStr);
+        if (idx !== -1) {
+          // Deduplicate: If state is already the same or more advanced (SUCCESS/FAILED), do not overwrite it
+          if (prev[idx].status === data.status && prev[idx].message === data.message) {
+            return prev;
+          }
+          if ((prev[idx].status === 'SUCCESS' || prev[idx].status === 'FAILED') && data.status === 'RUNNING') {
+            return prev;
+          }
+          
+          const updated = [...prev];
+          updated[idx] = { 
+            ...updated[idx], 
+            message: data.message, 
+            status: data.status, 
+            percentage: data.percentage,
+            completedAt: data.completedAt || (data.status === 'SUCCESS' || data.status === 'FAILED' ? new Date().toISOString() : null)
+          };
+          return updated;
+        }
+        return [...prev, { 
+          id: `log-${Date.now()}-${Math.round(Math.random() * 1000)}`,
+          step: stepStr, 
+          message: data.message, 
+          status: data.status, 
+          percentage: data.percentage, 
+          startedAt: data.startedAt || new Date().toISOString(),
+          completedAt: data.completedAt || null
+        }];
+      });
+    };
+
+    // Polling Fallback Helper
+    const startPolling = (mId) => {
+      // Disconnect SSE if active to prevent clashing and message duplication
+      if (eventSource) {
+        try { eventSource.close(); } catch (e) {}
+        eventSource = null;
+      }
+      if (fallbackTimer) {
+        clearTimeout(fallbackTimer);
+        fallbackTimer = null;
+      }
+      if (pollingIntervalId) clearInterval(pollingIntervalId);
+      
+      console.log('[POLLING FALLBACK] Starting HTTP status polling for migration:', mId);
+      
+      const fetchStatus = async () => {
+        try {
+          const res = await fetch(`/api/infrastructure/migrations/${mId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (!res.ok) return;
+          const data = await res.json();
+          
+          if (data.logs) {
+            data.logs.forEach(log => {
+              updateLogs({
+                step: log.step,
+                message: log.message,
+                status: log.status,
+                percentage: log.percentage,
+                startedAt: log.started_at,
+                completedAt: log.completed_at
+              });
+            });
+          }
+
+          if (data.status === 'COMPLETED') {
+            clearInterval(pollingIntervalId);
+            handleMigrationSuccess();
+          } else if (data.status === 'FAILED') {
+            clearInterval(pollingIntervalId);
+            handleMigrationFailure(data.error_log || 'Error desconocido');
+          }
+        } catch (err) {
+          console.error('[POLLING ERROR]', err);
+        }
+      };
+      
+      fetchStatus();
+      pollingIntervalId = setInterval(fetchStatus, 2000);
+      
+      pollRef.current = {
+        close: () => {
+          clearInterval(pollingIntervalId);
+        }
+      };
+    };
+
+    // SSE Stream setup
+    try {
+      eventSource = new EventSource(`/api/infrastructure/migrations/${migId}/stream?token=${token}`);
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('[SSE EVENT]', data);
+          
+          if (data.type === 'step' || data.type === 'migration:step') {
+            // Reset idle fallback timeout on every active event to keep SSE alive
+            if (fallbackTimer) {
+              clearTimeout(fallbackTimer);
+              fallbackTimer = setTimeout(() => {
+                console.log('[SSE TIMEOUT CHECK] SSE connection has been idle for 15 seconds. Starting HTTP polling fallback...');
+                startPolling(migId);
+              }, 15000);
+            }
+
+            updateLogs(data);
+          } else if (data.type === 'completed' || data.type === 'migration:completed') {
+            if (eventSource) eventSource.close();
+            if (fallbackTimer) clearTimeout(fallbackTimer);
+            handleMigrationSuccess();
+          } else if (data.type === 'failed' || data.type === 'migration:failed') {
+            if (eventSource) eventSource.close();
+            if (fallbackTimer) clearTimeout(fallbackTimer);
+            handleMigrationFailure(data.error);
+          }
+        } catch (e) {
+          console.error('[SSE PARSING ERROR]', e);
+        }
+      };
+
+      eventSource.onerror = (err) => {
+        console.error('[SSE CONNECTION ERROR - FALLING BACK TO POLLING]', err);
+        startPolling(migId);
+      };
+      
+      // Idle Timer fallback: starts polling if no events are received within 4 seconds of connection
+      fallbackTimer = setTimeout(() => {
+        console.log('[SSE TIMEOUT CHECK] SSE connection may be buffered or blocked. Starting HTTP polling fallback...');
+        startPolling(migId);
+      }, 4000);
+
+      pollRef.current = {
+        close: () => {
+          if (eventSource) eventSource.close();
+          if (fallbackTimer) clearTimeout(fallbackTimer);
+          if (pollingIntervalId) clearInterval(pollingIntervalId);
+        }
+      };
+
+    } catch (sseErr) {
+      console.error('[SSE INITIALIZATION FAILED - FALLING BACK TO POLLING]', sseErr);
+      startPolling(migId);
+    }
+  };
+
   // Step 4: Execute Migration
   const startMigration = async () => {
     if (!migrationId) return;
@@ -262,15 +510,6 @@ export default function MigrationWizard({ token, clients, onComplete }) {
     setCurrentStep(4);
     setOverallStatus('RUNNING');
     setMigrationLogs([]);
-    
-    // Start timing
-    const start = Date.now();
-    timerRef.current = setInterval(() => {
-      const diff = Math.floor((Date.now() - start) / 1000);
-      const mins = Math.floor(diff / 60);
-      const secs = diff % 60;
-      setElapsedTime(mins > 0 ? `${mins}m ${secs}s` : `${secs}s`);
-    }, 1000);
 
     try {
       const res = await fetch(`/api/infrastructure/migrations/${migrationId}/execute`, {
@@ -282,175 +521,15 @@ export default function MigrationWizard({ token, clients, onComplete }) {
       });
       
       if (!res.ok) throw new Error('Error al iniciar migración');
-      // Mutual exclusion control references
-      let eventSource = null;
-      let fallbackTimer = null;
-      let pollingIntervalId = null;
-
-      // Idempotent logs state updater with step filtering and deduplication
-      const updateLogs = (data) => {
-        if (!data.step) return;
-        const stepStr = String(data.step);
-        // Ignore initial metadata, analysis and simulation steps
-        if (stepStr.includes('Z') || stepStr.includes(':') || stepStr === 'analyze_backup' || stepStr === 'simulate_migration') {
-          return;
-        }
-
-        setMigrationLogs(prev => {
-          const idx = prev.findIndex(l => l.step === stepStr);
-          if (idx !== -1) {
-            // Deduplicate: If state is already the same or more advanced (SUCCESS/FAILED), do not overwrite it
-            if (prev[idx].status === data.status && prev[idx].message === data.message) {
-              return prev;
-            }
-            if ((prev[idx].status === 'SUCCESS' || prev[idx].status === 'FAILED') && data.status === 'RUNNING') {
-              return prev;
-            }
-            
-            const updated = [...prev];
-            updated[idx] = { 
-              ...updated[idx], 
-              message: data.message, 
-              status: data.status, 
-              percentage: data.percentage,
-              completedAt: data.completedAt || (data.status === 'SUCCESS' || data.status === 'FAILED' ? new Date().toISOString() : null)
-            };
-            return updated;
-          }
-          return [...prev, { 
-            id: `log-${Date.now()}-${Math.round(Math.random() * 1000)}`,
-            step: stepStr, 
-            message: data.message, 
-            status: data.status, 
-            percentage: data.percentage, 
-            startedAt: data.startedAt || new Date().toISOString(),
-            completedAt: data.completedAt || null
-          }];
-        });
-      };
-
-      // Polling Fallback Helper
-      const startPolling = (migId) => {
-        // Disconnect SSE if active to prevent clashing and message duplication
-        if (eventSource) {
-          try { eventSource.close(); } catch (e) {}
-          eventSource = null;
-        }
-        if (fallbackTimer) {
-          clearTimeout(fallbackTimer);
-          fallbackTimer = null;
-        }
-        if (pollingIntervalId) clearInterval(pollingIntervalId);
-        
-        console.log('[POLLING FALLBACK] Starting HTTP status polling for migration:', migId);
-        
-        const fetchStatus = async () => {
-          try {
-            const res = await fetch(`/api/infrastructure/migrations/${migId}`, {
-              headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (!res.ok) return;
-            const data = await res.json();
-            
-            if (data.logs) {
-              data.logs.forEach(log => {
-                updateLogs({
-                  step: log.step,
-                  message: log.message,
-                  status: log.status,
-                  percentage: log.percentage,
-                  startedAt: log.started_at,
-                  completedAt: log.completed_at
-                });
-              });
-            }
-
-            if (data.status === 'COMPLETED') {
-              clearInterval(pollingIntervalId);
-              handleMigrationSuccess();
-            } else if (data.status === 'FAILED') {
-              clearInterval(pollingIntervalId);
-              handleMigrationFailure(data.error_log || 'Error desconocido');
-            }
-          } catch (err) {
-            console.error('[POLLING ERROR]', err);
-          }
-        };
-        
-        fetchStatus();
-        pollingIntervalId = setInterval(fetchStatus, 2000);
-        
-        pollRef.current = {
-          close: () => {
-            clearInterval(pollingIntervalId);
-          }
-        };
-      };
-
-      // SSE Stream setup
-      try {
-        eventSource = new EventSource(`/api/infrastructure/migrations/${migrationId}/stream?token=${token}`);
-        
-        eventSource.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            console.log('[SSE EVENT]', data);
-            
-            if (data.type === 'step' || data.type === 'migration:step') {
-              // Reset idle fallback timeout on every active event to keep SSE alive
-              if (fallbackTimer) {
-                clearTimeout(fallbackTimer);
-                fallbackTimer = setTimeout(() => {
-                  console.log('[SSE TIMEOUT CHECK] SSE connection has been idle for 15 seconds. Starting HTTP polling fallback...');
-                  startPolling(migrationId);
-                }, 15000);
-              }
-
-              updateLogs(data);
-            } else if (data.type === 'completed' || data.type === 'migration:completed') {
-              if (eventSource) eventSource.close();
-              if (fallbackTimer) clearTimeout(fallbackTimer);
-              handleMigrationSuccess();
-            } else if (data.type === 'failed' || data.type === 'migration:failed') {
-              if (eventSource) eventSource.close();
-              if (fallbackTimer) clearTimeout(fallbackTimer);
-              handleMigrationFailure(data.error);
-            }
-          } catch (e) {
-            console.error('[SSE PARSING ERROR]', e);
-          }
-        };
-
-        eventSource.onerror = (err) => {
-          console.error('[SSE CONNECTION ERROR - FALLING BACK TO POLLING]', err);
-          startPolling(migrationId);
-        };
-        
-        // Idle Timer fallback: starts polling if no events are received within 4 seconds of connection
-        fallbackTimer = setTimeout(() => {
-          console.log('[SSE TIMEOUT CHECK] SSE connection may be buffered or blocked. Starting HTTP polling fallback...');
-          startPolling(migrationId);
-        }, 4000);
-
-        pollRef.current = {
-          close: () => {
-            if (eventSource) eventSource.close();
-            if (fallbackTimer) clearTimeout(fallbackTimer);
-            if (pollingIntervalId) clearInterval(pollingIntervalId);
-          }
-        };
-
-      } catch (sseErr) {
-        console.error('[SSE INITIALIZATION FAILED - FALLING BACK TO POLLING]', sseErr);
-        startPolling(migrationId);
-      }
-
+      
+      listenToMigrationStream(migrationId, Date.now());
     } catch (err) {
       handleMigrationFailure(err.message);
     }
   };
 
   const handleMigrationSuccess = async () => {
+    localStorage.removeItem('activeMigrationId');
     if (timerRef.current) clearInterval(timerRef.current);
     if (pollRef.current) {
       if (typeof pollRef.current.close === 'function') pollRef.current.close();
@@ -533,6 +612,7 @@ export default function MigrationWizard({ token, clients, onComplete }) {
   };
 
   const resetWizard = () => {
+    localStorage.removeItem('activeMigrationId');
     setCurrentStep(1);
     setUploadProgress(0);
     setUploadedFiles({

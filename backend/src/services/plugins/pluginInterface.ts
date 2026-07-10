@@ -10,4 +10,5 @@ export interface FrameworkPlugin {
   runHealthCheck?(domain: string, containerName: string, docRoot: string): Promise<boolean>;
   verifyDatabaseReady?(dbName: string, docRoot: string): Promise<void>;
   ensureWordpressDatabaseConnection?(containerName: string): Promise<void>;
+  fixPermissions?(containerName: string, siteRoot: string): Promise<void>;
 }

@@ -162,7 +162,6 @@ export const wordpressPlugin: FrameworkPlugin = {
 
       // Helper to update constant value keeping custom config intact
       const updateConstant = (contentStr: string, constant: string, value: string): string => {
-        const regex = new RegExp(`(define\\s*\\(\\s*${constant}\\s*,\\s*${constant}\\s*\\))`); // fallback regex
         const regex1 = new RegExp(`(define\\s*\\(\\s*['"]${constant}['"]\\s*,\\s*['"])(.*?)(['"]\\s*\\))`);
         if (regex1.test(contentStr)) {
           return contentStr.replace(regex1, `$1${value}$3`);
@@ -233,6 +232,88 @@ export const wordpressPlugin: FrameworkPlugin = {
     await ensureWordpressDatabaseConnection(containerName);
   },
 
+  async fixPermissions(containerName: string, siteRoot: string): Promise<void> {
+    log(`Reparando permisos de archivos de WordPress para el contenedor: ${containerName} (Directorio: ${siteRoot})`);
+    
+    if (!!config.migration.dryRun) {
+      log('[DRY RUN] Omitiendo reparación de permisos en modo simulación.');
+      return;
+    }
+
+    try {
+      // 1. Detect UID inside the container
+      let uid = '82'; // Default Alpine www-data UID
+      let gid = '82'; // Default Alpine www-data GID
+      
+      try {
+        const uidStr = execSync(`docker exec ${containerName} id -u www-data`, { timeout: 5000, stdio: 'pipe' }).toString().trim();
+        if (uidStr && !isNaN(parseInt(uidStr, 10))) {
+          uid = uidStr;
+        }
+      } catch (err) {
+        log(`Advertencia al detectar UID del contenedor: ${(err as Error).message}. Usando valor por defecto: ${uid}`);
+      }
+
+      try {
+        const gidStr = execSync(`docker exec ${containerName} id -g www-data`, { timeout: 5000, stdio: 'pipe' }).toString().trim();
+        if (gidStr && !isNaN(parseInt(gidStr, 10))) {
+          gid = gidStr;
+        }
+      } catch (err) {
+        log(`Advertencia al detectar GID del contenedor: ${(err as Error).message}. Usando valor por defecto: ${gid}`);
+      }
+
+      log(`UID detectado: ${uid}, GID detectado: ${gid}`);
+
+      const publicHtmlPath = path.join(siteRoot, 'public_html');
+      if (!fs.existsSync(publicHtmlPath)) {
+        log(`Advertencia: El directorio ${publicHtmlPath} no existe. No se pueden reparar permisos.`);
+        return;
+      }
+
+      // 2. chown -R on host
+      log(`Ejecutando chown -R ${uid}:${gid} en ${publicHtmlPath}...`);
+      execSync(`chown -R ${uid}:${gid} "${publicHtmlPath}"`, { timeout: 30000 });
+
+      // 3. chmod 755 (directories) and 644 (files) on host
+      log('Aplicando chmod 755 a directorios y 644 a archivos...');
+      execSync(`find "${publicHtmlPath}" -type d -exec chmod 755 {} +`, { timeout: 30000 });
+      execSync(`find "${publicHtmlPath}" -type f -exec chmod 644 {} +`, { timeout: 30000 });
+
+      // 4. Ensure writable subdirectories (wp-content, uploads, cache, upgrade, plugins) have 775/664
+      const writableDirs = [
+        path.join(publicHtmlPath, 'wp-content'),
+        path.join(publicHtmlPath, 'wp-content', 'uploads'),
+        path.join(publicHtmlPath, 'wp-content', 'cache'),
+        path.join(publicHtmlPath, 'wp-content', 'upgrade'),
+        path.join(publicHtmlPath, 'wp-content', 'plugins')
+      ];
+
+      for (const dirPath of writableDirs) {
+        if (!fs.existsSync(dirPath)) {
+          try {
+            fs.mkdirSync(dirPath, { recursive: true });
+            execSync(`chown ${uid}:${gid} "${dirPath}"`);
+          } catch {}
+        }
+        if (fs.existsSync(dirPath)) {
+          try {
+            execSync(`chmod 775 "${dirPath}"`);
+            execSync(`find "${dirPath}" -type d -exec chmod 775 {} +`, { timeout: 15000 });
+            execSync(`find "${dirPath}" -type f -exec chmod 664 {} +`, { timeout: 15000 });
+          } catch (chmodErr) {
+            log(`Advertencia ajustando permisos de escritura en ${dirPath}: ${(chmodErr as Error).message}`);
+          }
+        }
+      }
+
+      log('Permisos reparados exitosamente.');
+    } catch (err) {
+      console.error('[WORDPRESS PLUGIN ERROR] Failed to fix permissions', err);
+      throw new Error(`Fallo al reparar permisos de WordPress: ${(err as Error).message}`);
+    }
+  },
+
   async detectOriginalDomain(containerName: string, docRoot: string): Promise<string | null> {
     log(`Detectando dominio original de WordPress para contenedor: ${containerName}`);
     
@@ -301,45 +382,41 @@ export const wordpressPlugin: FrameworkPlugin = {
         return false;
       }
 
-      // 2. WP-CLI funcional
-      let wpInfo = '';
+      // 2. Validar PHP responde
       try {
-        wpInfo = execSync(`docker exec ${containerName} wp --info --allow-root`, { stdio: 'pipe' }).toString().trim();
+        const phpInfo = execSync(`docker exec ${containerName} php -v`, { stdio: 'pipe' }).toString().trim();
+        log(`HEALTH CHECK: PHP funcionando en contenedor (${phpInfo.split('\n')[0]})`);
       } catch (err: any) {
         const stdout = err.stdout ? err.stdout.toString().trim() : '';
         const stderr = err.stderr ? err.stderr.toString().trim() : (err.message || '');
-        log(`HEALTH CHECK FAILED: WP-CLI no responde. Comando: "wp --info", Status: ${err.status}, Stdout: "${stdout}", Stderr: "${stderr}"`);
+        log(`HEALTH CHECK FAILED: PHP no responde en contenedor. Status: ${err.status}, Stdout: "${stdout}", Stderr: "${stderr}"`);
         return false;
       }
 
-      // 3. WordPress core is-installed check
+      // 3. Validar WordPress conecta a DB (wp option get siteurl)
       try {
-        execSync(`docker exec ${containerName} wp core is-installed --allow-root`, { stdio: 'pipe' });
+        const siteUrl = execSync(`docker exec ${containerName} wp option get siteurl --allow-root`, { stdio: 'pipe' }).toString().trim();
+        log(`HEALTH CHECK: Conexión a Base de Datos validada. siteurl resuelve a: "${siteUrl}"`);
       } catch (err: any) {
         const stdout = err.stdout ? err.stdout.toString().trim() : '';
         const stderr = err.stderr ? err.stderr.toString().trim() : (err.message || '');
-        log(`HEALTH CHECK FAILED: WordPress no está operativo o la base de datos no está conectada. Comando: "wp core is-installed", Status: ${err.status}, Stdout: "${stdout}", Stderr: "${stderr}"`);
+        log(`HEALTH CHECK FAILED: WordPress no puede conectarse a la Base de Datos. Status: ${err.status}, Stdout: "${stdout}", Stderr: "${stderr}"`);
         return false;
       }
 
-      // 4. Tablas WordPress presentes (options table exists)
-      const mysqlHost = process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql';
-      const rootPass = config.db.password;
-      const targetTable = `${prefix}options`;
-
+      // 4. Validar permisos de escritura en uploads
       try {
-        const checkCmd = `docker exec -i ${mysqlHost} mysql -u root -p${rootPass} ${dbName} -N -e "SHOW TABLES LIKE '${targetTable}';"`;
-        const tableExists = execSync(checkCmd).toString().trim();
-        if (!tableExists) {
-          log(`HEALTH CHECK FAILED: La tabla ${targetTable} no existe. Base: "${dbName}", Prefijo: "${prefix}", Tabla: "${targetTable}".`);
-          return false;
-        }
+        execSync(`docker exec ${containerName} touch /var/www/html/wp-content/uploads/.healthcheck`, { stdio: 'pipe' });
+        execSync(`docker exec ${containerName} rm -f /var/www/html/wp-content/uploads/.healthcheck`, { stdio: 'pipe' });
+        log('HEALTH CHECK: Permisos de escritura validados exitosamente en wp-content/uploads.');
       } catch (err: any) {
-        log(`HEALTH CHECK FAILED: Error al verificar tabla en MySQL. Base: "${dbName}", Prefijo: "${prefix}", Tabla: "${targetTable}". Detalle: ${err.message}`);
+        const stdout = err.stdout ? err.stdout.toString().trim() : '';
+        const stderr = err.stderr ? err.stderr.toString().trim() : (err.message || '');
+        log(`HEALTH CHECK FAILED: No hay permisos de escritura en wp-content/uploads. Status: ${err.status}, Stdout: "${stdout}", Stderr: "${stderr}"`);
         return false;
       }
 
-      // 5. Sitio responde correctamente (HTTP check)
+      // 5. Validar respuesta HTTP local/remota
       try {
         const httpCode = execSync(`curl -s -o /dev/null -w "%{http_code}" -H "Host: ${domain}" http://localhost/`, { timeout: 5000 }).toString().trim();
         log(`Respuesta HTTP local para ${domain}: ${httpCode}`);

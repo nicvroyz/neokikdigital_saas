@@ -8,6 +8,7 @@ import { dockerService } from './dockerService';
 import { databaseService } from './databaseService';
 import { sslService } from './sslService';
 import { healthService } from './healthService';
+import { hostingService } from './hostingService';
 import { storageService } from './storageService';
 import { wordpressPlugin } from './plugins/wordpressPlugin';
 import { laravelPlugin } from './plugins/laravelPlugin';
@@ -95,6 +96,8 @@ export const migrationService = {
       if (!domain) throw new Error('No se ha resuelto el dominio de la migración.');
       const backupPath = mig.backup_path;
       const destDir = path.join(config.infrastructure.storagePath, 'migrations', 'extracted', migrationId);
+      const siteRoot = `${config.infrastructure.clientSitesPath}/${domain}`;
+      const docRoot = path.join(siteRoot, 'public_html');
 
       let analysisReport: any = null;
       let emailDomains: any[] = [];
@@ -150,7 +153,6 @@ export const migrationService = {
         // Step 3: Copiar únicamente los archivos del sitio (Rule 5)
         log(`Paso 3: Copiando archivos desde ${srcWebPath} al destino final...`);
         await this.logStep(migrationId, 'site:deploying', 'Desplegando archivos del sitio al almacenamiento de hosting...', 'RUNNING', 30);
-        const docRoot = `${config.infrastructure.clientSitesPath}/${domain}`;
         if (!fs.existsSync(docRoot)) {
           fs.mkdirSync(docRoot, { recursive: true });
         }
@@ -240,12 +242,11 @@ export const migrationService = {
             
             log(`Ejecutando wp search-replace de '${cleanOriginal}' a '${cleanTarget}'`);
             
-            const isDryRun = !!config.migration.dryRun;
             if (!isDryRun) {
               try {
-                execSync(`docker exec ${containerName} wp search-replace "${cleanOriginal}" "${cleanTarget}" --allow-root`, { timeout: 120000 });
-                execSync(`docker exec ${containerName} wp search-replace "http://${cleanOriginal}" "https://${cleanTarget}" --allow-root`, { timeout: 120000 });
-                execSync(`docker exec ${containerName} wp search-replace "https://${cleanOriginal}" "https://${cleanTarget}" --allow-root`, { timeout: 120000 });
+                execSync(`docker exec ${containerName} wp search-replace "${cleanOriginal}" "${cleanTarget}" --all-tables --allow-root`, { timeout: 120000 });
+                execSync(`docker exec ${containerName} wp search-replace "http://${cleanOriginal}" "https://${cleanTarget}" --all-tables --allow-root`, { timeout: 120000 });
+                execSync(`docker exec ${containerName} wp search-replace "https://${cleanOriginal}" "https://${cleanTarget}" --all-tables --allow-root`, { timeout: 120000 });
               } catch (srErr) {
                 log(`Advertencia en wp search-replace: ${(srErr as Error).message}`);
               }
@@ -256,7 +257,6 @@ export const migrationService = {
             log('Advertencia: Se omitió wp search-replace porque no se pudo detectar el dominio original.');
           }
 
-          const isDryRun = !!config.migration.dryRun;
           if (!isDryRun) {
             try {
               execSync(`docker exec ${containerName} wp cache flush --allow-root`, { timeout: 30000 });
@@ -266,13 +266,19 @@ export const migrationService = {
           }
         }
 
+        // Step 9.5: Reparación de permisos WordPress (PermissionFixer)
+        if (plugin && typeof plugin.fixPermissions === 'function') {
+          log('Paso 9.5: Reparando permisos del sitio web...');
+          await this.logStep(migrationId, 'plugin:executing', 'Reparando permisos de archivos y carpetas del sitio...', 'RUNNING', 78);
+          await plugin.fixPermissions(containerName, siteRoot);
+        }
+
         let commands: string[] = [];
         if (mig.detected_project_type !== 'WORDPRESS' && plugin) {
           commands = await plugin.getMigrationCommands(domain, destDir);
           if (commands.length > 0) {
             log('Ejecutando tareas específicas del framework...');
             for (const cmd of commands) {
-              const isDryRun = !!config.migration.dryRun;
               if (!isDryRun) {
                 execSync(cmd);
               } else {
@@ -286,6 +292,7 @@ export const migrationService = {
         // Step 10: Configure SSL on Proxy Caddy (80%)
         log('Paso 10: Configurando Caddy/SSL...');
         await this.logStep(migrationId, 'ssl:generating', 'Configurando enrutamiento seguro y recargando Caddy...', 'RUNNING', 80);
+        await hostingService.applyCaddyConfig(domain, docRoot, false);
         await sslService.configureSSL(domain);
         await this.logStep(migrationId, 'ssl:generating', 'Enrutamiento SSL Let\'s Encrypt configurado.', 'SUCCESS', 84);
 
@@ -315,7 +322,7 @@ export const migrationService = {
           let totalSourceMessages = 0;
           let totalDestMessages = 0;
           const migrationResults: string[] = [];
-          const isDryRunMode = !!config.migration.dryRun;
+          const isDryRunMode = isDryRun;
 
           for (const acc of allAccounts) {
             const email = `${acc.local_part}@${acc.domain}`;
@@ -360,6 +367,20 @@ export const migrationService = {
               log(`Error al crear buzón ${email}: ${(mbErr as Error).message}`);
               if (!isDryRunMode) throw mbErr;
               migrationResults.push(`${email}: ❌ Error al crear buzón`);
+            }
+          }
+
+          // 4. Provision Email Aliases & Forwarders
+          const emailAliases = analysisReport?.aliases || [];
+          if (emailAliases.length > 0) {
+            log(`Migrando ${emailAliases.length} alias/redirecciones de correo...`);
+            for (const alias of emailAliases) {
+              try {
+                log(`Creando redirección: ${alias.address} -> ${alias.goto}`);
+                await mailcowService.createAlias(alias.address, alias.goto);
+              } catch (aliasErr) {
+                log(`Advertencia al crear redirección ${alias.address}: ${(aliasErr as Error).message}`);
+              }
             }
           }
 

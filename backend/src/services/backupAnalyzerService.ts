@@ -54,6 +54,10 @@ export interface AnalysisReport {
   domain?: string;
   domainSource?: string;
   confidence?: number;
+  aliases?: {
+    address: string;
+    goto: string;
+  }[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -576,6 +580,9 @@ export const backupAnalyzerService = {
       // Detect emails
       const emails = this.detectEmails(contentRoot);
 
+      // Detect email aliases
+      const aliases = this.detectEmailAliases(contentRoot, domains.primary);
+
       // Detect cron jobs
       const cronFile = path.join(contentRoot, 'cron');
       const cronJobs = fs.existsSync(cronFile) ? parseCronFile(cronFile) : [];
@@ -605,6 +612,7 @@ export const backupAnalyzerService = {
         wordpress,
         databases,
         emails,
+        aliases,
         phpVersion: wordpress?.phpVersion || this.detectPhpVersion(contentRoot),
         diskUsage: { total: formatBytes(totalSize), breakdown },
         cronJobs,
@@ -840,6 +848,37 @@ export const backupAnalyzerService = {
     }
 
     return emailData;
+  },
+
+  detectEmailAliases(contentRoot: string, domain: string): { address: string; goto: string }[] {
+    const valiasesFile = path.join(contentRoot, 'etc', 'valiases', domain);
+    const aliases: { address: string; goto: string }[] = [];
+    
+    if (fs.existsSync(valiasesFile)) {
+      try {
+        const content = fs.readFileSync(valiasesFile, 'utf-8');
+        const lines = content.split('\n');
+        for (const line of lines) {
+          const parts = line.split(':');
+          if (parts.length >= 2) {
+            const address = parts[0].trim();
+            const goto = parts.slice(1).join(':').trim();
+            
+            // Skip cPanel default system fail/blackhole routes
+            if (address === '*' || goto.includes(':fail:') || goto.includes(':blackhole:')) {
+              continue;
+            }
+            if (address && goto) {
+              const targets = goto.split(',').map(t => t.trim()).filter(Boolean);
+              for (const target of targets) {
+                aliases.push({ address, goto: target });
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+    return aliases;
   },
 
   detectSSLCerts(contentRoot: string): AnalysisReport['sslCertificates'] {

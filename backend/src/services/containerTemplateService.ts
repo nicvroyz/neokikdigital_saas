@@ -18,22 +18,39 @@ ${domain} {
     `.trim();
   },
 
-  generateDockerRunCommand(domain: string, projectType: string, phpVersion: string): string {
-    log(`Generando docker run para: ${domain} (Tipo: ${projectType})`);
+  generateDockerComposeFile(domain: string, projectType: string, phpVersion: string, dbName: string, dbUser: string, dbPass: string): string {
+    log(`Generando docker-compose.yml para: ${domain} (Tipo: ${projectType})`);
     const containerName = domain.replace(/[^a-zA-Z0-9]/g, '_');
-    const docRoot = `${config.infrastructure.clientSitesPath}/${domain}`;
     const image = projectType === 'WORDPRESS' ? 'neokik-wordpress:latest' : `php:${phpVersion}-fpm-alpine`;
-    
-    // Connected to Caddy central proxy network
-    return `docker run -d \\
-      --name ${containerName} \\
-      --network caddy_proxy \\
-      --restart unless-stopped \\
-      -v ${docRoot}:/var/www/html \\
-      -l "caddy=${domain}" \\
-      -l "caddy.root=*/var/www/html" \\
-      -l "caddy.php_fastcgi={{upstreams 9000}}" \\
-      -l "caddy.file_server=" \\
-      ${image}`.trim();
+    const mysqlContainer = process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql';
+
+    return `
+version: '3.8'
+
+services:
+  app:
+    container_name: ${containerName}
+    image: ${image}
+    restart: unless-stopped
+    volumes:
+      - ./public_html:/var/www/html
+    networks:
+      - caddy_proxy
+    environment:
+      - WORDPRESS_DB_HOST=${mysqlContainer}
+      - WORDPRESS_DB_NAME=${dbName}
+      - WORDPRESS_DB_USER=${dbUser}
+      - WORDPRESS_DB_PASSWORD=${dbPass}
+    labels:
+      - "caddy=${domain}"
+      - "caddy.root=*/var/www/html"
+      - "caddy.php_fastcgi={{upstreams 9000}}"
+      - "caddy.file_server="
+
+networks:
+  caddy_proxy:
+    external: true
+    name: caddy_proxy
+`.trim();
   }
 };

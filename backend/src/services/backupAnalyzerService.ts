@@ -467,7 +467,8 @@ export const backupAnalyzerService = {
         log('El archivo de respaldo real existe. Intentando análisis real...');
         return await this.performRealAnalysis(filePath, backupType);
       } catch (err) {
-        logError('Error en análisis real del archivo, cayendo a simulación', err);
+        logError('Error en análisis real del archivo', err);
+        throw err;
       }
     }
 

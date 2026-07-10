@@ -180,6 +180,10 @@ export const wordpressPlugin: FrameworkPlugin = {
       const mysqlHost = process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql';
       content = updateConstant(content, 'DB_HOST', mysqlHost);
 
+      // Disable forced SSL database connection flags from cPanel migrations to allow standard docker network connections
+      content = content.replace(/define\s*\(\s*['"]MYSQL_CLIENT_FLAGS['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_CLIENT_FLAGS', 0)");
+      content = content.replace(/define\s*\(\s*['"]MYSQL_SSL['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_SSL', false)");
+
       fs.writeFileSync(wpConfigPath, content, 'utf-8');
       log('wp-config.php configurado exitosamente.');
     } catch (err) {

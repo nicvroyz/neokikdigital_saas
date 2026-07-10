@@ -1,4 +1,5 @@
 import { query } from '../config/db';
+import { execSync } from 'child_process';
 import { config } from '../config/env';
 import { backupAnalyzerService } from './backupAnalyzerService';
 import { dnsAnalyzerService } from './dnsAnalyzerService';
@@ -83,7 +84,14 @@ export const migrationService = {
       const mig = await this.getMigration(migrationId);
       if (!mig) throw new Error('Migración no encontrada');
 
-      const domain = mig.domain || 'midominio.cl';
+      // Prevent running if already failed or completed
+      if (mig.status === 'FAILED' || mig.status === 'COMPLETED' || mig.status === 'ROLLED_BACK') {
+        log(`La migración ${migrationId} ya está en estado final (${mig.status}). Abortando ejecución.`);
+        return;
+      }
+
+      const domain = mig.domain;
+      if (!domain) throw new Error('No se ha resuelto el dominio de la migración.');
       const backupPath = mig.backup_path;
       const destDir = path.join(config.infrastructure.storagePath, 'migrations', 'extracted', migrationId);
 
@@ -93,400 +101,402 @@ export const migrationService = {
       await query('DELETE FROM migration_logs WHERE migration_id = $1', [migrationId]);
       
       // Update main status
-    await query(
-      `UPDATE migrations 
-       SET status = 'MIGRATING', 
-           current_step = 'EXTRACTING_BACKUP', 
-           started_at = $1, 
-           updated_at = $2 
-       WHERE id = $3`,
-      [new Date().toISOString(), new Date().toISOString(), migrationId]
-    );
-
-    eventBus.emit('migration:started', { migrationId, domain });
-
-    try {
-      // Step 1: Extract Backup (10%)
-      log('Paso 1: Extrayendo respaldo...');
-      await this.logStep(migrationId, 'backup:extracting', 'Extrayendo archivos del respaldo cPanel...', 'RUNNING', 10);
-      await storageService.extract(backupPath, destDir);
-      await this.logStep(migrationId, 'backup:extracting', 'Respaldo extraído exitosamente.', 'SUCCESS', 20);
-      await query('UPDATE migrations SET rollback_step = \'CLEANUP_EXTRACTED\' WHERE id = $1', [migrationId]);
-
-      // Step 2: Create MySQL database and import data (25%)
-      const dbName = `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
-      const dbUser = `user_${domain.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 10)}`;
-      const dbPass = `Pass_${Math.random().toString(36).substring(2, 10)}!`;
-
-      try {
-        analysisReport = typeof mig.analysis_report === 'string' ? JSON.parse(mig.analysis_report) : mig.analysis_report;
-      } catch { /* ignore parse errors */ }
-
-      const hasDatabases = analysisReport?.databases && Array.isArray(analysisReport.databases) && analysisReport.databases.length > 0;
-
-      if (hasDatabases) {
-        log('Paso 2: Creando base de datos MySQL...');
-        await this.logStep(migrationId, 'database:restoring', 'Creando base de datos y usuario en contenedor MySQL...', 'RUNNING', 30);
-        await databaseService.createDatabase(dbName, dbUser, dbPass);
-        
-        // Look for SQL dump in backup
-        const sqlDir = path.join(destDir, 'mysql');
-        let sqlFile = '';
-        if (fs.existsSync(sqlDir)) {
-          const files = fs.readdirSync(sqlDir).filter(f => f.endsWith('.sql') || f.endsWith('.sql.gz'));
-          if (files.length > 0) sqlFile = path.join(sqlDir, files[0]);
-        }
-        
-        if (sqlFile) {
-          await this.logStep(migrationId, 'database:restoring', `Importando archivo de base de datos ${path.basename(sqlFile)}...`, 'RUNNING', 40);
-          await databaseService.importSQLDump(dbName, sqlFile, mig.detected_project_type);
-        }
-        
-        await this.logStep(migrationId, 'database:restoring', 'Base de datos MySQL configurada e importada.', 'SUCCESS', 50);
-        await query('UPDATE migrations SET rollback_step = \'DROP_DATABASE\' WHERE id = $1', [migrationId]);
-      } else {
-        log('Omitiendo creación de base de datos MySQL (no se detectaron bases de datos en el reporte).');
-        await this.logStep(migrationId, 'database:restoring', 'No se detectaron bases de datos. Omitiendo paso de base de datos.', 'SUCCESS', 50);
-      }
-
-      // Apply framework configurations
-      log('Aplicando reconfiguraciones de archivos específicas del framework...');
-      await this.logStep(migrationId, 'plugin:executing', 'Reconfigurando archivos del framework (wp-config.php/env)...', 'RUNNING', 55);
-      const dbConfig = { dbName, dbUser, dbPass, dbHost: 'mysql-container' };
-      if (mig.detected_project_type === 'WORDPRESS') {
-        await wordpressPlugin.onMigrate(domain, destDir, dbConfig);
-      } else if (mig.detected_project_type === 'LARAVEL') {
-        await laravelPlugin.onMigrate(domain, destDir, dbConfig);
-      } else if (mig.detected_project_type === 'HTML') {
-        await staticHtmlPlugin.onMigrate(domain, destDir, dbConfig);
-      }
-
-      // Copy files to final sites directory
-      log('Copiando archivos del sitio migrado a sites/');
-      await this.logStep(migrationId, 'site:deploying', 'Desplegando archivos del sitio al almacenamiento de hosting...', 'RUNNING', 57);
-      
-      const docRoot = `${config.infrastructure.clientSitesPath}/${domain}`;
-      if (!fs.existsSync(docRoot)) {
-        fs.mkdirSync(docRoot, { recursive: true });
-      }
-      
-      // Determine where the web files are
-      let srcWebPath = destDir;
-      const possibleWebPaths = [
-        path.join(destDir, 'public_html'),
-        path.join(destDir, 'homedir', 'public_html'),
-        path.join(destDir, 'homedir')
-      ];
-      
-      for (const p of possibleWebPaths) {
-        if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
-          srcWebPath = p;
-          break;
-        }
-      }
-      
-      log(`Copiando de ${srcWebPath} a ${docRoot}`);
-      await storageService.copy(srcWebPath, docRoot);
-      await this.logStep(migrationId, 'site:deploying', 'Archivos del sitio desplegados correctamente.', 'SUCCESS', 59);
-
-      // Step 3: Create Container (40%)
-      log('Paso 3: Creando contenedor Docker...');
-      await this.logStep(migrationId, 'container:creating', 'Creando y enlazando contenedor Docker con volumenes...', 'RUNNING', 60);
-      await dockerService.createContainer(domain, mig.detected_project_type || 'WORDPRESS', '8.2');
-      await this.logStep(migrationId, 'container:creating', 'Contenedor Docker iniciado y enlazado correctamente.', 'SUCCESS', 70);
-      await query('UPDATE migrations SET rollback_step = \'REMOVE_CONTAINER\' WHERE id = $1', [migrationId]);
-
-      // Execute framework post-migration commands
-      let commands: string[] = [];
-      if (mig.detected_project_type === 'WORDPRESS') {
-        commands = await wordpressPlugin.getMigrationCommands(domain, destDir);
-      } else if (mig.detected_project_type === 'LARAVEL') {
-        commands = await laravelPlugin.getMigrationCommands(domain, destDir);
-      } else if (mig.detected_project_type === 'HTML') {
-        commands = await staticHtmlPlugin.getMigrationCommands(domain, destDir);
-      }
-
-      if (commands.length > 0) {
-        log('Ejecutando comandos post-migración del framework...');
-        for (const cmd of commands) {
-          const isDryRun = !!config.migration.dryRun;
-          try {
-            if (!isDryRun) {
-              const { execSync } = require('child_process');
-              execSync(cmd);
-            } else {
-              log(`[DRY RUN SIMULATE CMD] ${cmd}`);
-            }
-          } catch (cmdErr) {
-            console.error(`[COMMAND ERROR] Failed to run command: ${cmd}`, cmdErr);
-            if (!isDryRun) {
-              throw new Error(`Fallo al ejecutar comando post-migración: ${cmd}. Detalle: ${(cmdErr as Error).message}`);
-            }
-          }
-        }
-      }
-      await this.logStep(migrationId, 'plugin:executing', 'Plugins del framework configurados y comandos ejecutados.', 'SUCCESS', 72);
-
-      // Step 4: Configure SSL on Proxy Caddy (55%)
-      log('Paso 4: Configurando Caddy/SSL...');
-      await this.logStep(migrationId, 'ssl:generating', 'Configurando enrutamiento seguro y recargando Caddy...', 'RUNNING', 75);
-      await sslService.configureSSL(domain);
-      await this.logStep(migrationId, 'ssl:generating', 'Enrutamiento SSL Let\'s Encrypt configurado.', 'SUCCESS', 80);
-
-      // Step 5: Mailcow integration - Full email migration with content copy (70%)
-      log('Paso 5: Integración Mailcow...');
-      await this.logStep(migrationId, 'mailcow:restoring', 'Creando dominio y buzones de correo en Mailcow API...', 'RUNNING', 85);
-      await mailcowService.createDomain(domain);
-      
-      // Parse analysis report for detected email accounts
-      try {
-        analysisReport = typeof mig.analysis_report === 'string' ? JSON.parse(mig.analysis_report) : mig.analysis_report;
-      } catch { /* ignore parse errors */ }
-
-      const emailDomains = analysisReport?.emails || [];
-      const allAccounts: { local_part: string; domain: string; quota: string; messageCount: number; folders: string[] }[] = [];
-      
-      for (const emailDomain of emailDomains) {
-        if (emailDomain.accounts && Array.isArray(emailDomain.accounts)) {
-          for (const acc of emailDomain.accounts) {
-            const localPart = acc.address?.split('@')[0] || 'contacto';
-            allAccounts.push({
-              local_part: localPart,
-              domain: emailDomain.domain || domain,
-              quota: acc.quota || '500 MB',
-              messageCount: acc.messageCount || 0,
-              folders: acc.folders || ['INBOX', 'Sent', 'Drafts', 'Trash']
-            });
-          }
-        }
-      }
-
-      // Fallback: if no accounts detected, create a default one
-      if (allAccounts.length === 0) {
-        allAccounts.push({
-          local_part: 'contacto',
-          domain,
-          quota: '500 MB',
-          messageCount: 0,
-          folders: ['INBOX', 'Sent', 'Drafts', 'Trash']
-        });
-      }
-
-      // Create all mailboxes and migrate content
-      const isDryRunMode = !!config.migration.dryRun;
-      const migrationResults: string[] = [];
-      let totalSourceMessages = 0;
-      let totalDestMessages = 0;
-
-      let currentMailboxIndex = 0;
-      const totalMailboxes = allAccounts.length;
-      for (const acc of allAccounts) {
-        currentMailboxIndex++;
-        const email = `${acc.local_part}@${acc.domain}`;
-        const password = `Temp_${Math.random().toString(36).substring(2, 10)}!`;
-        const quotaMB = parseInt(acc.quota) || 512;
-
-        try {
-          await this.logStep(
-            migrationId, 
-            'mailcow:restoring', 
-            `Migrando buzón ${currentMailboxIndex}/${totalMailboxes}: ${email} (${acc.messageCount} mensajes)...`, 
-            'RUNNING', 
-            80 + Math.floor((currentMailboxIndex / totalMailboxes) * 10)
-          );
-
-          await mailcowService.createMailbox({
-            local_part: acc.local_part,
-            domain: acc.domain,
-            password,
-            quota: quotaMB,
-            name: acc.local_part.charAt(0).toUpperCase() + acc.local_part.slice(1)
-          });
-
-          // Maildir content migration
-          const sourceMaildirPaths = [
-            path.join(destDir, 'mail', acc.domain, acc.local_part),
-            path.join(destDir, 'homedir', 'mail', acc.domain, acc.local_part)
-          ];
-
-          let sourceMaildir = '';
-          for (const p of sourceMaildirPaths) {
-            if (fs.existsSync(p)) {
-              sourceMaildir = p;
-              break;
-            }
-          }
-
-          const sourceCount = acc.messageCount;
-          totalSourceMessages += sourceCount;
-
-          if (isDryRunMode) {
-            // DryRun: simulate Maildir copy by creating dummy files in temp dir
-            const dryMaildir = path.join(os.tmpdir(), 'neokik-migration', migrationId, 'vmail', acc.domain, acc.local_part, 'cur');
-            fs.mkdirSync(dryMaildir, { recursive: true });
-            for (let i = 0; i < Math.min(sourceCount, 5); i++) {
-              fs.writeFileSync(path.join(dryMaildir, `msg_${i}.eml`), `From: test@${acc.domain}\nSubject: Migrated message ${i}\n\nDummy email content for simulation.`);
-            }
-            // Count dummy files as "destination messages" to match source count in simulation
-            totalDestMessages += sourceCount;
-            log(`[DRY RUN] Simulado copia de ${sourceCount} mensajes para ${email}`);
-            migrationResults.push(`${email}: ${sourceCount} mensajes migrados (simulado)`);
-          } else if (sourceMaildir) {
-            // Production: copy Maildir content to Mailcow vmail volume using docker cp
-            try {
-              const { execSync } = require('child_process');
-              const containerId = execSync("docker ps -q -f name=dovecot-mailcow").toString().trim();
-              if (containerId) {
-                log(`Integración Mailcow: Copiando correos para ${email} mediante docker cp...`);
-                // Ensure target directory exists inside the container
-                execSync(`docker exec ${containerId} mkdir -p /var/vmail/${acc.domain}/${acc.local_part}`);
-                // Copy the local Maildir directory contents using docker cp
-                execSync(`docker cp "${sourceMaildir}/." ${containerId}:/var/vmail/${acc.domain}/${acc.local_part}/`);
-                // Set correct ownership inside the container
-                execSync(`docker exec ${containerId} chown -R vmail:vmail /var/vmail/${acc.domain}/${acc.local_part}`);
-                // Rebuild Dovecot index
-                execSync(`docker exec ${containerId} doveadm force-resync -u ${email} '*'`);
-                
-                // Verify message count inside container
-                const destCountOutput = execSync(`docker exec ${containerId} find "/var/vmail/${acc.domain}/${acc.local_part}" -path "*/cur/*" -o -path "*/new/*" -type f | wc -l`).toString().trim();
-                const destCount = parseInt(destCountOutput) || 0;
-                totalDestMessages += destCount;
-                
-                if (sourceCount > 0 && destCount === 0) {
-                  log(`ADVERTENCIA: ${email} - 0 mensajes en destino pero ${sourceCount} esperados`);
-                  migrationResults.push(`${email}: ⚠️ ${destCount} de ${sourceCount} mensajes — verificar copia`);
-                } else {
-                  migrationResults.push(`${email}: ${destCount} de ${sourceCount} mensajes migrados correctamente`);
-                }
-              } else {
-                throw new Error('Contenedor dovecot-mailcow no encontrado');
-              }
-            } catch (rsyncErr) {
-              log(`Error al copiar Maildir para ${email}: ${(rsyncErr as Error).message}`);
-              migrationResults.push(`${email}: ❌ Falló copia de correos`);
-            }
-          } else {
-            // No source maildir found - mailbox created empty
-            totalDestMessages += 0;
-            migrationResults.push(`${email}: buzón creado (sin contenido Maildir en backup)`);
-          }
-        } catch (mbErr) {
-          log(`Error al crear buzón ${email}: ${(mbErr as Error).message}`);
-          if (!isDryRunMode) {
-            throw mbErr;
-          }
-          migrationResults.push(`${email}: ❌ Error al crear buzón`);
-        }
-      }
-
-      const mailSummary = `${allAccounts.length} buzones procesados. ${migrationResults.join(' | ')}`;
-      
-      // Verify overall message count parity
-      if (!isDryRunMode && totalSourceMessages > 0 && totalDestMessages === 0) {
-        await this.logStep(migrationId, 'mailcow:restoring', `${totalDestMessages} de ${totalSourceMessages} mensajes migrados — fallo en la copia de contenido`, 'FAILED', 90);
-        throw new Error(`Fallo en migración de correos: ${totalDestMessages} de ${totalSourceMessages} mensajes migrados`);
-      }
-
-      await this.logStep(migrationId, 'mailcow:restoring', `Dominio y ${allAccounts.length} buzones configurados. Contenido IMAP restaurado. ${totalSourceMessages > 0 ? totalDestMessages + ' de ' + totalSourceMessages + ' mensajes migrados.' : ''}`, 'SUCCESS', 90);
-
-      // Step 6: Post Migration Health Audits (90%)
-      log('Paso 6: Ejecutando Auditoría de Salud...');
-      await this.logStep(migrationId, 'verification:running', 'Verificando DNS, HTTPS, SSL, puertos SMTP e IMAP...', 'RUNNING', 95);
-      const audit = await healthService.runAudit(domain);
-      
-      await this.logStep(migrationId, 'verification:running', `Auditoría finalizada. Score de Salud: ${audit.overall_score}%`, 'SUCCESS', 100);
-
-      // Finalize
       await query(
         `UPDATE migrations 
-         SET status = 'COMPLETED', 
-             current_step = 'COMPLETED', 
-             completed_at = $1, 
+         SET status = 'MIGRATING', 
+             current_step = 'EXTRACTING_BACKUP', 
+             started_at = $1, 
              updated_at = $2 
          WHERE id = $3`,
         [new Date().toISOString(), new Date().toISOString(), migrationId]
       );
 
-      // Register the client in the database automatically upon successful migration
+      eventBus.emit('migration:started', { migrationId, domain });
+
       try {
-        const existingClient = await query('SELECT * FROM clients WHERE domain = $1', [domain]);
-        let clientId = null;
-        if (existingClient.rows.length === 0) {
-          log(`Migración completada con éxito. Registrando automáticamente nuevo cliente para: ${domain}`);
+        const plugin = mig.detected_project_type === 'WORDPRESS' ? wordpressPlugin : (mig.detected_project_type === 'HTML' ? staticHtmlPlugin : null);
+
+        // Step 1: Extract Backup (10%)
+        log('Paso 1: Extrayendo respaldo...');
+        await this.logStep(migrationId, 'backup:extracting', 'Extrayendo archivos del respaldo cPanel...', 'RUNNING', 10);
+        await storageService.extract(backupPath, destDir);
+        await this.logStep(migrationId, 'backup:extracting', 'Respaldo extraído exitosamente.', 'SUCCESS', 20);
+        await query('UPDATE migrations SET rollback_step = \'CLEANUP_EXTRACTED\' WHERE id = $1', [migrationId]);
+
+        // Step 2: Detect document root (Rule 5 & Rule 7)
+        log('Paso 2: Detectando directorio raíz del sitio web...');
+        await this.logStep(migrationId, 'site:deploying', 'Detectando directorio raíz real del sitio web...', 'RUNNING', 25);
+        let srcWebPath = destDir;
+        if (plugin && typeof plugin.detectDocumentRoot === 'function') {
+          srcWebPath = plugin.detectDocumentRoot(destDir);
+        } else {
+          // fallback
+          const possibleWebPaths = [
+            path.join(destDir, 'public_html'),
+            path.join(destDir, 'homedir', 'public_html'),
+            path.join(destDir, 'homedir')
+          ];
+          for (const p of possibleWebPaths) {
+            if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
+              srcWebPath = p;
+              break;
+            }
+          }
+        }
+
+        // Step 3: Copiar únicamente los archivos del sitio (Rule 5)
+        log(`Paso 3: Copiando archivos desde ${srcWebPath} al destino final...`);
+        await this.logStep(migrationId, 'site:deploying', 'Desplegando archivos del sitio al almacenamiento de hosting...', 'RUNNING', 30);
+        const docRoot = `${config.infrastructure.clientSitesPath}/${domain}`;
+        if (!fs.existsSync(docRoot)) {
+          fs.mkdirSync(docRoot, { recursive: true });
+        }
+        await storageService.copy(srcWebPath, docRoot);
+        await this.logStep(migrationId, 'site:deploying', 'Archivos del sitio desplegados correctamente.', 'SUCCESS', 40);
+
+        // Step 4: Create MySQL Database / User / Import SQL (Rule 7)
+        const dbName = `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const dbUser = `user_${domain.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 10)}`;
+        const dbPass = `Pass_${Math.random().toString(36).substring(2, 10)}!`;
+        const dbConfig = { dbName, dbUser, dbPass, dbHost: process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql' };
+
+        try {
+          analysisReport = typeof mig.analysis_report === 'string' ? JSON.parse(mig.analysis_report) : mig.analysis_report;
+        } catch { /* ignore parse errors */ }
+
+        const hasDatabases = analysisReport?.databases && Array.isArray(analysisReport.databases) && analysisReport.databases.length > 0;
+
+        if (hasDatabases) {
+          log('Paso 4: Creando base de datos MySQL...');
+          await this.logStep(migrationId, 'database:restoring', 'Creando base de datos y usuario en contenedor MySQL...', 'RUNNING', 45);
+          await databaseService.createDatabase(dbName, dbUser, dbPass);
+          await query('UPDATE migrations SET rollback_step = \'DROP_DATABASE\' WHERE id = $1', [migrationId]);
+
+          // Look for SQL dump in backup
+          const sqlDir = path.join(destDir, 'mysql');
+          let sqlFile = '';
+          if (fs.existsSync(sqlDir)) {
+            const files = fs.readdirSync(sqlDir).filter(f => f.endsWith('.sql') || f.endsWith('.sql.gz'));
+            if (files.length > 0) sqlFile = path.join(sqlDir, files[0]);
+          }
+
+          if (sqlFile) {
+            await this.logStep(migrationId, 'database:restoring', `Importando archivo de base de datos ${path.basename(sqlFile)}...`, 'RUNNING', 50);
+            await databaseService.importSQLDump(dbName, sqlFile, mig.detected_project_type);
+          }
+          await this.logStep(migrationId, 'database:restoring', 'Base de datos MySQL configurada e importada.', 'SUCCESS', 55);
+        } else {
+          log('Omitiendo creación de base de datos MySQL.');
+          await this.logStep(migrationId, 'database:restoring', 'No se detectaron bases de datos. Omitiendo paso de base de datos.', 'SUCCESS', 55);
+        }
+
+        // Step 5: Crear contenedor
+        log('Paso 5: Creando contenedor Docker...');
+        await this.logStep(migrationId, 'container:creating', 'Creando y enlazando contenedor Docker con volumenes...', 'RUNNING', 60);
+        await dockerService.createContainer(domain, mig.detected_project_type || 'WORDPRESS', '8.2');
+        await query('UPDATE migrations SET rollback_step = \'REMOVE_CONTAINER\' WHERE id = $1', [migrationId]);
+
+        // Step 6: Esperar que el contenedor esté listo (Rule 3)
+        const containerName = domain.replace(/[^a-zA-Z0-9]/g, '_');
+        log(`Paso 6: Esperando que el contenedor ${containerName} esté listo...`);
+        await this.logStep(migrationId, 'container:creating', 'Esperando que los servicios internos del contenedor estén listos...', 'RUNNING', 65);
+        await this.waitForContainerReady(containerName, mig.detected_project_type === 'WORDPRESS');
+        await this.logStep(migrationId, 'container:creating', 'Contenedor Docker iniciado y enlazado correctamente.', 'SUCCESS', 70);
+
+        // Step 7: Configurar wp-config.php (Rule 6)
+        if (plugin && typeof plugin.configureDatabaseConfig === 'function') {
+          log('Paso 7: Configurando archivos de conexión a base de datos...');
+          await this.logStep(migrationId, 'plugin:executing', 'Configurando archivos de conexión a base de datos (wp-config)...', 'RUNNING', 72);
+          await plugin.configureDatabaseConfig(docRoot, dbConfig);
+        }
+
+        // Step 8: Detectar dominio original (Rule 4)
+        let originalDomain: string | null = null;
+        if (plugin && typeof plugin.detectOriginalDomain === 'function') {
+          log('Paso 8: Detectando dominio original...');
+          originalDomain = await plugin.detectOriginalDomain(containerName, docRoot);
+        }
+
+        // Step 9: Ejecutar wp search-replace y cache flush (Rule 7)
+        if (mig.detected_project_type === 'WORDPRESS') {
+          log('Paso 9: Ejecutando comandos post-migración (WP-CLI)...');
+          await this.logStep(migrationId, 'plugin:executing', 'Ejecutando reemplazo de URL y limpieza de caché...', 'RUNNING', 75);
           
-          const clientName = domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1);
-          let clientEmail = `contacto@${domain}`;
+          if (originalDomain) {
+            const cleanOriginal = originalDomain.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+            const cleanTarget = domain;
+            
+            log(`Ejecutando wp search-replace de '${cleanOriginal}' a '${cleanTarget}'`);
+            
+            const isDryRun = !!config.migration.dryRun;
+            if (!isDryRun) {
+              try {
+                execSync(`docker exec ${containerName} wp search-replace "${cleanOriginal}" "${cleanTarget}" --allow-root`, { timeout: 120000 });
+                execSync(`docker exec ${containerName} wp search-replace "http://${cleanOriginal}" "https://${cleanTarget}" --allow-root`, { timeout: 120000 });
+                execSync(`docker exec ${containerName} wp search-replace "https://${cleanOriginal}" "https://${cleanTarget}" --allow-root`, { timeout: 120000 });
+              } catch (srErr) {
+                log(`Advertencia en wp search-replace: ${(srErr as Error).message}`);
+              }
+            } else {
+              log(`[DRY RUN] Simular wp search-replace de ${cleanOriginal} a ${cleanTarget}`);
+            }
+          } else {
+            log('Advertencia: Se omitió wp search-replace porque no se pudo detectar el dominio original.');
+          }
+
+          const isDryRun = !!config.migration.dryRun;
+          if (!isDryRun) {
+            try {
+              execSync(`docker exec ${containerName} wp cache flush --allow-root`, { timeout: 30000 });
+            } catch (cfErr) {
+              log(`Advertencia en wp cache flush: ${(cfErr as Error).message}`);
+            }
+          }
+        }
+
+        let commands: string[] = [];
+        if (mig.detected_project_type !== 'WORDPRESS' && plugin) {
+          commands = await plugin.getMigrationCommands(domain, destDir);
+          if (commands.length > 0) {
+            log('Ejecutando tareas específicas del framework...');
+            for (const cmd of commands) {
+              const isDryRun = !!config.migration.dryRun;
+              if (!isDryRun) {
+                execSync(cmd);
+              } else {
+                log(`[DRY RUN SIMULATE CMD] ${cmd}`);
+              }
+            }
+          }
+        }
+        await this.logStep(migrationId, 'plugin:executing', 'Plugins del framework configurados y comandos ejecutados.', 'SUCCESS', 78);
+
+        // Step 10: Configure SSL on Proxy Caddy (80%)
+        log('Paso 10: Configurando Caddy/SSL...');
+        await this.logStep(migrationId, 'ssl:generating', 'Configurando enrutamiento seguro y recargando Caddy...', 'RUNNING', 80);
+        await sslService.configureSSL(domain);
+        await this.logStep(migrationId, 'ssl:generating', 'Enrutamiento SSL Let\'s Encrypt configurado.', 'SUCCESS', 84);
+
+        // Step 11: Mailcow integration (85%)
+        log('Paso 11: Integración Mailcow...');
+        await this.logStep(migrationId, 'mailcow:restoring', 'Creando dominio y buzones de correo en Mailcow API...', 'RUNNING', 85);
+        await mailcowService.createDomain(domain);
+
+        const emailDomains = analysisReport?.emails || [];
+        const allAccounts: { local_part: string; domain: string; quota: string; messageCount: number; folders: string[] }[] = [];
+        for (const emailDomain of emailDomains) {
+          if (emailDomain.accounts && Array.isArray(emailDomain.accounts)) {
+            for (const acc of emailDomain.accounts) {
+              allAccounts.push({
+                local_part: acc.address.split('@')[0],
+                domain: domain,
+                quota: acc.quota || '512',
+                messageCount: acc.messageCount || 0,
+                folders: acc.folders || []
+              });
+            }
+          }
+        }
+
+        let totalSourceMessages = 0;
+        let totalDestMessages = 0;
+        const migrationResults: string[] = [];
+        const isDryRunMode = !!config.migration.dryRun;
+
+        for (const acc of allAccounts) {
+          const email = `${acc.local_part}@${acc.domain}`;
+          const mailboxPass = `Mail_${Math.random().toString(36).substring(2, 10)}!`;
+          totalSourceMessages += acc.messageCount;
+
+          try {
+            log(`Creando buzón: ${email}`);
+            await mailcowService.createMailbox({
+              local_part: acc.local_part,
+              domain: acc.domain,
+              password: mailboxPass,
+              quota: 1024,
+              name: acc.local_part
+            });
+
+            const sourceMaildir = path.join(destDir, 'mail', acc.local_part);
+            if (fs.existsSync(sourceMaildir) && !isDryRunMode) {
+              try {
+                const checkDovecot = execSync(`docker ps -q -f name=dovecot-mailcow`).toString().trim();
+                if (checkDovecot) {
+                  const destMaildir = `/var/vmail/${domain}/${acc.local_part}/Maildir/`;
+                  execSync(`docker exec -i dovecot-mailcow mkdir -p ${destMaildir}`);
+                  execSync(`docker cp ${sourceMaildir}/. dovecot-mailcow:${destMaildir}`);
+                  execSync(`docker exec -i dovecot-mailcow chown -R vmail:vmail /var/vmail/${domain}/${acc.local_part}`);
+                  
+                  const count = execSync(`docker exec -i dovecot-mailcow find ${destMaildir} -type f | wc -l`).toString().trim();
+                  const destCount = parseInt(count, 10) || 0;
+                  totalDestMessages += destCount;
+                  migrationResults.push(`${email}: ${destCount} de ${acc.messageCount} mensajes copiados`);
+                } else {
+                  throw new Error('Contenedor dovecot-mailcow no encontrado');
+                }
+              } catch (rsyncErr) {
+                log(`Error al copiar Maildir para ${email}: ${(rsyncErr as Error).message}`);
+                migrationResults.push(`${email}: ❌ Falló copia de correos`);
+              }
+            } else {
+              migrationResults.push(`${email}: buzón creado (vacío)`);
+            }
+          } catch (mbErr) {
+            log(`Error al crear buzón ${email}: ${(mbErr as Error).message}`);
+            if (!isDryRunMode) throw mbErr;
+            migrationResults.push(`${email}: ❌ Error al crear buzón`);
+          }
+        }
+
+        if (!isDryRunMode && totalSourceMessages > 0 && totalDestMessages === 0) {
+          await this.logStep(migrationId, 'mailcow:restoring', 'Fallo en migración de correos: IMAP no migrado.', 'FAILED', 88);
+          throw new Error('Fallo en migración de correos: IMAP no migrado.');
+        }
+        await this.logStep(migrationId, 'mailcow:restoring', 'Dominio y buzones de correo configurados en Mailcow.', 'SUCCESS', 90);
+
+        // Step 12: Health Check obligatorio (Rule 8)
+        log('Paso 12: Ejecutando Health Check obligatorio...');
+        await this.logStep(migrationId, 'verification:running', 'Ejecutando verificaciones de salud y seguridad...', 'RUNNING', 92);
+        
+        let healthPassed = true;
+        if (plugin && typeof plugin.runHealthCheck === 'function') {
+          healthPassed = await plugin.runHealthCheck(domain, containerName, docRoot);
+        } else {
+          const inspectStatus = execSync(`docker inspect -f "{{.State.Running}}" ${containerName}`).toString().trim();
+          healthPassed = inspectStatus === 'true';
+        }
+
+        if (!healthPassed && !isDryRunMode) {
+          throw new Error('El Health Check obligatorio falló. Revise los contenedores y permisos.');
+        }
+        await this.logStep(migrationId, 'verification:running', 'Health Check obligatorio aprobado.', 'SUCCESS', 95);
+
+        const audit = await healthService.runAudit(domain);
+        await this.logStep(migrationId, 'verification:running', `Auditoría finalizada. Score de Salud: ${audit.overall_score}%`, 'SUCCESS', 100);
+
+        // Finalize
+        await query(
+          `UPDATE migrations 
+           SET status = 'COMPLETED', 
+               current_step = 'COMPLETED', 
+               completed_at = $1, 
+               updated_at = $2 
+           WHERE id = $3`,
+          [new Date().toISOString(), new Date().toISOString(), migrationId]
+        );
+
+        // Register client
+        try {
+          const existingClient = await query('SELECT * FROM clients WHERE domain = $1', [domain]);
+          let clientId = null;
+          if (existingClient.rows.length === 0) {
+            log(`Registrando automáticamente nuevo cliente para: ${domain}`);
+            const clientName = domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1);
+            let clientEmail = `contacto@${domain}`;
+            
+            try {
+              if (emailDomains[0]?.accounts?.[0]?.address) {
+                clientEmail = emailDomains[0].accounts[0].address;
+              }
+            } catch {}
+
+            const createdClient = await clientService.createClient({
+              name: clientName,
+              company_name: clientName + ' Sp SpA',
+              email: clientEmail,
+              domain: domain,
+              service_type: 'HOSTING_AND_MAINTENANCE',
+              plan_interval: 'MONTHLY',
+              amount_per_period: 89000.00,
+              currency: 'CLP',
+              status: 'ACTIVE',
+              last_payment_date: new Date().toISOString().split('T')[0],
+              expiration_date: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().split('T')[0],
+              grace_period_days: 5,
+              doc_root: docRoot,
+              notes: `Cliente registrado automáticamente el ${new Date().toLocaleDateString('es-CL')}.`
+            });
+            clientId = createdClient.id;
+          } else {
+            clientId = existingClient.rows[0].id;
+          }
+
+          if (clientId) {
+            await query('UPDATE migrations SET client_id = $1 WHERE id = $2', [clientId, migrationId]);
+          }
+        } catch (clientErr) {
+          log(`Error registrando cliente: ${(clientErr as Error).message}`);
+        }
+
+        eventBus.emit('migration:completed', { migrationId });
+        await storageService.cleanup(destDir);
+
+      } catch (err) {
+        const errMsg = (err as Error).message || 'Error desconocido';
+        log(`Error crítico en la migración ${migrationId}: ${errMsg}`);
+        
+        const currentMig = await this.getMigration(migrationId);
+        if (currentMig && currentMig.status !== 'FAILED' && currentMig.status !== 'ROLLED_BACK') {
+          await query(
+            `UPDATE migrations 
+             SET status = 'FAILED', 
+                 error_log = $1, 
+                 updated_at = $2 
+             WHERE id = $3`,
+            [errMsg, new Date().toISOString(), migrationId]
+          );
+          
+          eventBus.emit('migration:failed', { migrationId, error: errMsg });
+          await this.logStep(migrationId, 'execution_error', `Error crítico: ${errMsg}. Iniciando Rollback automático...`, 'FAILED', 0);
           
           try {
-            const report = typeof mig.analysis_report === 'string' ? JSON.parse(mig.analysis_report) : mig.analysis_report;
-            if (report && report.emails && report.emails[0] && report.emails[0].accounts && report.emails[0].accounts[0]) {
-              clientEmail = report.emails[0].accounts[0].address;
-            }
-          } catch {}
-
-          const createdClient = await clientService.createClient({
-            name: clientName,
-            company_name: clientName + ' Sp SpA',
-            email: clientEmail,
-            domain: domain,
-            service_type: 'HOSTING_AND_MAINTENANCE',
-            plan_interval: 'MONTHLY',
-            amount_per_period: 89000.00,
-            currency: 'CLP',
-            status: 'ACTIVE',
-            last_payment_date: new Date().toISOString().split('T')[0],
-            expiration_date: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().split('T')[0], // 30 days initial trial
-            grace_period_days: 5,
-            doc_root: `${config.infrastructure.clientSitesPath}/${domain}`,
-            notes: `Cliente registrado automáticamente a través del motor de migración cPanel el ${new Date().toLocaleDateString('es-CL')}.`
-          });
-          clientId = createdClient.id;
-          log(`Registro del cliente para ${domain} creado con éxito. ID: ${clientId}`);
-        } else {
-          clientId = existingClient.rows[0].id;
-          log(`El cliente con el dominio ${domain} ya existe en el sistema. Omitiendo duplicación. ID: ${clientId}`);
+            await this.rollbackMigration(migrationId);
+          } catch (rollbackErr) {
+            log(`Error durante rollback automático: ${(rollbackErr as Error).message}`);
+          }
         }
-
-        if (clientId) {
-          await query('UPDATE migrations SET client_id = $1 WHERE id = $2', [clientId, migrationId]);
-          log(`Relación migration.client_id actualizada exitosamente.`);
-        }
-      } catch (clientErr) {
-        log(`Error registrando el cliente migrado: ${(clientErr as Error).message}`);
+        throw err;
       }
-
-      eventBus.emit('migration:completed', { migrationId });
-
-      // Cleanup temporary files only on success
-      await storageService.cleanup(destDir);
-
-    } catch (err) {
-      const errMsg = (err as Error).message || 'Error desconocido';
-      log(`Error crítico en la migración ${migrationId}: ${errMsg}`);
-      
-      await query(
-        `UPDATE migrations 
-         SET status = 'FAILED', 
-             error_log = $1, 
-             updated_at = $2 
-         WHERE id = $3`,
-        [errMsg, new Date().toISOString(), migrationId]
-      );
-      
-      eventBus.emit('migration:failed', { migrationId, error: errMsg });
-      
-      await this.logStep(migrationId, 'execution_error', `Error crítico: ${errMsg}. Iniciando Rollback automático...`, 'FAILED', 0);
-      
-      // Perform automatic rollback on failure
-      try {
-        await this.rollbackMigration(migrationId);
-      } catch (rollbackErr) {
-        log(`Error durante rollback automático: ${(rollbackErr as Error).message}`);
-      }
-      
-      throw err;
-    }
     });
+  },
+
+  async waitForContainerReady(containerName: string, isWordpress = true): Promise<void> {
+    const isDryRun = !!config.migration.dryRun;
+    if (isDryRun) return;
+
+    const maxWaitMs = 60000; // 60 seconds
+    const intervalMs = 2000; // poll every 2 seconds
+    const startTime = Date.now();
+
+    log(`Esperando a que el contenedor ${containerName} esté listo (WordPress: ${isWordpress})...`);
+
+    while (Date.now() - startTime < maxWaitMs) {
+      try {
+        const inspect = execSync(`docker inspect -f "{{.State.Running}}" ${containerName}`).toString().trim();
+        if (inspect === 'true') {
+          if (isWordpress) {
+            const info = execSync(`docker exec ${containerName} wp --info --allow-root`, { timeout: 3000, stdio: 'pipe' }).toString().trim();
+            if (info.includes('PHP version') && info.includes('WP-CLI')) {
+              log(`Contenedor WordPress ${containerName} está listo.`);
+              return;
+            }
+          } else {
+            // General PHP check
+            const info = execSync(`docker exec ${containerName} php -v`, { timeout: 3000, stdio: 'pipe' }).toString().trim();
+            if (info.includes('PHP')) {
+              log(`Contenedor PHP ${containerName} está listo.`);
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        log(`Contenedor ${containerName} no está listo todavía...`);
+      }
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+
+    throw new Error(`Timeout: El contenedor ${containerName} no se inició correctamente.`);
   },
 
   async logStep(migrationId: string, step: string, message: string, status: 'SUCCESS' | 'FAILED' | 'RUNNING', percentage: number) {
@@ -516,7 +526,10 @@ export const migrationService = {
     log(`Ejecutando Rollback para la migración: ${migrationId}`);
     
     const mig = await this.getMigration(migrationId);
-    if (!mig) return;
+    if (!mig || mig.status === 'ROLLED_BACK') {
+      log(`Rollback: La migración ${migrationId} ya fue revertida o no existe. Omitiendo.`);
+      return;
+    }
 
     const domain = mig.domain;
     const rollbackStep = mig.rollback_step;
@@ -525,18 +538,30 @@ export const migrationService = {
     try {
       if (rollbackStep === 'REMOVE_CONTAINER' || rollbackStep === 'DROP_DATABASE' || rollbackStep === 'CLEANUP_EXTRACTED') {
         log('Rollback: Eliminando contenedor Docker...');
-        await dockerService.removeContainer(domain);
+        try {
+          if (domain) {
+            await dockerService.removeContainer(domain);
+          }
+        } catch (err) {
+          log(`Advertencia en Rollback: falló eliminar contenedor: ${(err as Error).message}`);
+        }
       }
       
       if (rollbackStep === 'DROP_DATABASE') {
         log('Rollback: Eliminando base de datos MySQL...');
-        const dbName = `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
-        await databaseService.dropDatabase(dbName);
+        try {
+          if (domain) {
+            const dbName = `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
+            await databaseService.dropDatabase(dbName);
+          }
+        } catch (err) {
+          log(`Advertencia en Rollback: falló eliminar base de datos: ${(err as Error).message}`);
+        }
       }
       
       // Cleanup client database record if auto-created
       try {
-        if (!mig.client_id) {
+        if (!mig.client_id && domain) {
           log('Rollback: Eliminando registro de cliente auto-creado...');
           await query('DELETE FROM clients WHERE domain = $1', [domain]);
         }
@@ -544,12 +569,14 @@ export const migrationService = {
 
       // Cleanup target host site directory
       try {
-        const baseRoot = path.resolve(config.infrastructure.clientSitesPath);
-        const targetSiteDir = path.resolve(path.join(baseRoot, domain));
-        if (targetSiteDir.startsWith(baseRoot) && targetSiteDir !== baseRoot && domain && domain.includes('.')) {
-          if (fs.existsSync(targetSiteDir)) {
-            log(`Rollback: Eliminando directorio del sitio verificado: ${targetSiteDir}`);
-            await storageService.cleanup(targetSiteDir);
+        if (domain) {
+          const baseRoot = path.resolve(config.infrastructure.clientSitesPath);
+          const targetSiteDir = path.resolve(path.join(baseRoot, domain));
+          if (targetSiteDir.startsWith(baseRoot) && targetSiteDir !== baseRoot && domain.includes('.')) {
+            if (fs.existsSync(targetSiteDir)) {
+              log(`Rollback: Eliminando directorio del sitio verificado: ${targetSiteDir}`);
+              await storageService.cleanup(targetSiteDir);
+            }
           }
         }
       } catch (dirErr) {
@@ -557,7 +584,11 @@ export const migrationService = {
       }
 
       // Cleanup files
-      await storageService.cleanup(destDir);
+      try {
+        if (fs.existsSync(destDir)) {
+          await storageService.cleanup(destDir);
+        }
+      } catch (err) { /* ignore */ }
       
       await query('UPDATE migrations SET status = \'ROLLED_BACK\', current_step = \'ROLLED_BACK\', updated_at = $1 WHERE id = $2', [new Date().toISOString(), migrationId]);
       log('Rollback de migración completado.');

@@ -19,9 +19,10 @@ ${domain} {
   },
 
   generateDockerRunCommand(domain: string, projectType: string, phpVersion: string): string {
-    log(`Generando docker run para: ${domain}`);
+    log(`Generando docker run para: ${domain} (Tipo: ${projectType})`);
     const containerName = domain.replace(/[^a-zA-Z0-9]/g, '_');
     const docRoot = `${config.infrastructure.clientSitesPath}/${domain}`;
+    const image = projectType === 'WORDPRESS' ? 'neokik-wordpress:latest' : `php:${phpVersion}-fpm-alpine`;
     
     // Connected to Caddy central proxy network
     return `docker run -d \\
@@ -30,7 +31,9 @@ ${domain} {
       --restart unless-stopped \\
       -v ${docRoot}:/var/www/html \\
       -l "caddy=${domain}" \\
-      -l "caddy.reverse_proxy={{upstreams 80}}" \\
-      php:${phpVersion}-fpm-alpine`.trim();
+      -l "caddy.root=*/var/www/html" \\
+      -l "caddy.php_fastcgi={{upstreams 9000}}" \\
+      -l "caddy.file_server=" \\
+      ${image}`.trim();
   }
 };

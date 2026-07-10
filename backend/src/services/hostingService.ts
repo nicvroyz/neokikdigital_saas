@@ -24,7 +24,9 @@ ${domain}, www.${domain} {
     return `
 # Auto-generated Caddy Config for ${domain} [ACTIVE]
 ${domain}, www.${domain} {
-    reverse_proxy ${containerName}:80
+    root * ${docRoot}
+    php_fastcgi ${containerName}:9000
+    file_server
     encode gzip
     log {
         output file /var/log/caddy/${domain}.log

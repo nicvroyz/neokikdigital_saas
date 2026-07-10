@@ -119,7 +119,8 @@ export const workerProcessor = {
 
           // Retry logic
           const nextAttempt = job.attempts + 1;
-          if (nextAttempt < job.max_attempts) {
+          const isMigration = job.job_type === 'MIGRATION';
+          if (nextAttempt < job.max_attempts && !isMigration) {
             log(`Reintentando trabajo ${job.id} (Intento ${nextAttempt + 1} de ${job.max_attempts})...`);
             await queueService.updateJobStatus(job.id, 'PENDING', errMsg);
             

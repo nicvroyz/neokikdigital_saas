@@ -43,7 +43,7 @@ services:
       - /etc/os-release:/host/os-release:ro
       - /etc/hostname:/host/hostname:ro
       - /:/host/root:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock
       - /srv/neokik:/srv/neokik
     depends_on:
       postgres:

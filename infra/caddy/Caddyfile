@@ -23,3 +23,20 @@ mail.jacvroyz.cl {
 		}
 	}
 }
+papelesconcepcion.cl {
+        request_body {
+                max_size 10GB
+        }
+
+        root * /srv/neokik/sites/papelesconcepcion.cl/public_html
+
+        php_fastcgi papelesconcepcion_cl:9000 {
+                root /var/www/html
+        }
+
+        file_server
+}
+
+www.papelesconcepcion.cl {
+        redir https://papelesconcepcion.cl{uri}
+}

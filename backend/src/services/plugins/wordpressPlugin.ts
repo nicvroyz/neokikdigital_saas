@@ -148,6 +148,46 @@ export const wordpressPlugin: FrameworkPlugin = {
     const wpConfigPath = path.join(docRoot, 'wp-config.php');
     const samplePath = path.join(docRoot, 'wp-config-sample.php');
 
+    // 1. Rename conflicting/alternative configs and database drop-ins
+    const possibleConfigs = [
+      'wp-config-local.php',
+      'local-config.php',
+      'wp-config-hosting.php'
+    ];
+    for (const cfg of possibleConfigs) {
+      const cfgPath = path.join(docRoot, cfg);
+      if (fs.existsSync(cfgPath)) {
+        log(`[WARNING] Encontrado archivo de configuración alternativo: ${cfg}. Renombrándolo a ${cfg}.bak.`);
+        try {
+          fs.renameSync(cfgPath, cfgPath + '.bak');
+        } catch {}
+      }
+    }
+
+    const dbPhpPath = path.join(docRoot, 'wp-content', 'db.php');
+    if (fs.existsSync(dbPhpPath)) {
+      log(`[WARNING] Encontrado drop-in de base de datos wp-content/db.php. Renombrándolo a db.php.bak.`);
+      try {
+        fs.renameSync(dbPhpPath, dbPhpPath + '.bak');
+      } catch {}
+    }
+
+    // 2. Delete local MySQL client config files (.my.cnf, my.cnf, my.ini)
+    const configFiles = ['.my.cnf', 'my.cnf', 'my.ini'];
+    for (const file of configFiles) {
+      const paths = [path.join(docRoot, file), path.join(path.dirname(docRoot), file)];
+      for (const p of paths) {
+        if (fs.existsSync(p)) {
+          log(`[WARNING] Encontrado archivo de configuración local de MySQL en ${p}. Eliminándolo.`);
+          try {
+            fs.unlinkSync(p);
+          } catch (err) {
+            log(`Error eliminando ${p}: ${(err as Error).message}`);
+          }
+        }
+      }
+    }
+
     if (!fs.existsSync(wpConfigPath)) {
       if (fs.existsSync(samplePath)) {
         log('Generando wp-config.php desde wp-config-sample.php...');
@@ -159,6 +199,15 @@ export const wordpressPlugin: FrameworkPlugin = {
 
     try {
       let content = fs.readFileSync(wpConfigPath, 'utf-8');
+
+      // Diagnostic logging of original configuration lines
+      log(`--- DIAGNÓSTICO WP-CONFIG ORIGINAL ---`);
+      const originalLines = content.split('\n');
+      for (const line of originalLines) {
+        if (/ssl|flags|client/i.test(line)) {
+          log(`Línea original: ${line.trim()}`);
+        }
+      }
 
       // Helper to update constant value keeping custom config intact
       const updateConstant = (contentStr: string, constant: string, value: string): string => {
@@ -186,6 +235,15 @@ export const wordpressPlugin: FrameworkPlugin = {
       content = content.replace(/define\s*\(\s*['"]MYSQL_SSL_CA['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_SSL_CA', '')");
       content = content.replace(/define\s*\(\s*['"]MYSQL_SSL_KEY['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_SSL_KEY', '')");
       content = content.replace(/define\s*\(\s*['"]MYSQL_SSL_CERT['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_SSL_CERT', '')");
+
+      // Log modified configuration lines
+      log(`--- DIAGNÓSTICO WP-CONFIG MODIFICADO ---`);
+      const modifiedLines = content.split('\n');
+      for (const line of modifiedLines) {
+        if (/ssl|flags|client/i.test(line)) {
+          log(`Línea modificada: ${line.trim()}`);
+        }
+      }
 
       fs.writeFileSync(wpConfigPath, content, 'utf-8');
       log('wp-config.php configurado exitosamente.');

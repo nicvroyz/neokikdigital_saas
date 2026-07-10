@@ -2,8 +2,11 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { config } from '../config/env';
 
-const uploadsDir = path.join(__dirname, '../../uploads/migrations');
+const uploadsDir = config.migration.dryRun
+  ? path.join(__dirname, '../../uploads/migrations')
+  : (config.infrastructure.uploadsDir || '/srv/neokik/storage/migrations');
 
 // Create uploads directory if it doesn't exist
 if (!fs.existsSync(uploadsDir)) {

@@ -53,8 +53,8 @@ export const dockerService = {
         execSync('docker network create caddy_proxy', { stdio: 'ignore' });
       } catch {}
 
-      // Spin up using docker compose
-      const cmd = `docker compose -f "${composePath}" up -d`;
+      // Spin up using docker-compose
+      const cmd = `docker-compose -f "${composePath}" up -d`;
       log(`Ejecutando: ${cmd}`);
       execSync(cmd);
 

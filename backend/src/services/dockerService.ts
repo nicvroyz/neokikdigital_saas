@@ -204,7 +204,7 @@ export const dockerService = {
           isContainerRunning = true;
           if (isWordpress) {
             try {
-              const dbCheck = execFileSync('docker', ['exec', containerName, 'wp', 'db', 'check', '--allow-root', '--', '--skip-ssl'], { timeout: 5000, stdio: 'pipe' }).toString().trim();
+              const dbCheck = execFileSync('docker', ['exec', containerName, 'wp', 'db', 'check', '--allow-root'], { timeout: 5000, stdio: 'pipe' }).toString().trim();
               if (dbCheck.toLowerCase().includes('success')) {
                 log(`Contenedor WordPress ${containerName} está completamente operativo.`);
                 return;

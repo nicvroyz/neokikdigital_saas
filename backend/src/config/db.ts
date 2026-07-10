@@ -539,7 +539,6 @@ export const query = async (text: string, params?: any[]) => {
 
   if (trimmed.startsWith('INSERT INTO job_queue')) {
     const hasExplicitId = trimmed.includes('(id,') || trimmed.includes('(id ');
-    const offset = hasExplicitId ? 1 : 0;
     
     const parseField = (val: any) => {
       if (typeof val !== 'string') return val;
@@ -560,12 +559,28 @@ export const query = async (text: string, params?: any[]) => {
       attempts = 1;
     }
 
+    let jobId = hasExplicitId ? params?.[0] : randomUUID();
+    let jobType = 'MIGRATION';
+    let referenceId = '';
+    let payloadStr = '{}';
+
+    if (trimmed.includes("VALUES ($1, 'MIGRATION', $2")) {
+      jobId = params?.[0];
+      jobType = 'MIGRATION';
+      referenceId = params?.[1];
+    } else {
+      const offset = hasExplicitId ? 1 : 0;
+      jobType = params?.[0 + offset] || 'MIGRATION';
+      referenceId = params?.[1 + offset];
+      payloadStr = params?.[2 + offset] || '{}';
+    }
+
     const newJob: any = {
-      id: hasExplicitId ? params?.[0] : randomUUID(),
-      job_type: params?.[0 + offset] || 'MIGRATION',
-      reference_id: params?.[1 + offset],
+      id: jobId,
+      job_type: jobType,
+      reference_id: referenceId,
       status: status,
-      payload: parseField(params?.[2 + offset] || '{}'),
+      payload: parseField(payloadStr),
       attempts: attempts,
       max_attempts: 3,
       error_message: null,

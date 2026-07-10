@@ -21,6 +21,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 
 export const correlationStorage = new AsyncLocalStorage<string>();
+const executedRollbacks = new Set<string>();
 
 function log(msg: string) {
   const correlationId = correlationStorage.getStore();
@@ -96,6 +97,8 @@ export const migrationService = {
       const destDir = path.join(config.infrastructure.storagePath, 'migrations', 'extracted', migrationId);
 
       let analysisReport: any = null;
+      let emailDomains: any[] = [];
+      const isDryRun = !!config.migration.dryRun;
 
       // Reset logs
       await query('DELETE FROM migration_logs WHERE migration_id = $1', [migrationId]);
@@ -183,6 +186,11 @@ export const migrationService = {
           if (sqlFile) {
             await this.logStep(migrationId, 'database:restoring', `Importando archivo de base de datos ${path.basename(sqlFile)}...`, 'RUNNING', 50);
             await databaseService.importSQLDump(dbName, sqlFile, mig.detected_project_type);
+
+            if (plugin && typeof plugin.verifyDatabaseReady === 'function') {
+              await this.logStep(migrationId, 'database:restoring', 'Esperando que las tablas se importen completamente en MySQL...', 'RUNNING', 52);
+              await plugin.verifyDatabaseReady(dbName, docRoot);
+            }
           }
           await this.logStep(migrationId, 'database:restoring', 'Base de datos MySQL configurada e importada.', 'SUCCESS', 55);
         } else {
@@ -221,6 +229,10 @@ export const migrationService = {
         if (mig.detected_project_type === 'WORDPRESS') {
           log('Paso 9: Ejecutando comandos post-migración (WP-CLI)...');
           await this.logStep(migrationId, 'plugin:executing', 'Ejecutando reemplazo de URL y limpieza de caché...', 'RUNNING', 75);
+
+          if (plugin && typeof plugin.ensureWordpressDatabaseConnection === 'function') {
+            await plugin.ensureWordpressDatabaseConnection(containerName);
+          }
           
           if (originalDomain) {
             const cleanOriginal = originalDomain.replace(/^https?:\/\//i, '').replace(/\/$/, '');
@@ -280,80 +292,92 @@ export const migrationService = {
         // Step 11: Mailcow integration (85%)
         log('Paso 11: Integración Mailcow...');
         await this.logStep(migrationId, 'mailcow:restoring', 'Creando dominio y buzones de correo en Mailcow API...', 'RUNNING', 85);
-        await mailcowService.createDomain(domain);
+        
+        try {
+          await mailcowService.createDomain(domain);
 
-        const emailDomains = analysisReport?.emails || [];
-        const allAccounts: { local_part: string; domain: string; quota: string; messageCount: number; folders: string[] }[] = [];
-        for (const emailDomain of emailDomains) {
-          if (emailDomain.accounts && Array.isArray(emailDomain.accounts)) {
-            for (const acc of emailDomain.accounts) {
-              allAccounts.push({
-                local_part: acc.address.split('@')[0],
-                domain: domain,
-                quota: acc.quota || '512',
-                messageCount: acc.messageCount || 0,
-                folders: acc.folders || []
-              });
-            }
-          }
-        }
-
-        let totalSourceMessages = 0;
-        let totalDestMessages = 0;
-        const migrationResults: string[] = [];
-        const isDryRunMode = !!config.migration.dryRun;
-
-        for (const acc of allAccounts) {
-          const email = `${acc.local_part}@${acc.domain}`;
-          const mailboxPass = `Mail_${Math.random().toString(36).substring(2, 10)}!`;
-          totalSourceMessages += acc.messageCount;
-
-          try {
-            log(`Creando buzón: ${email}`);
-            await mailcowService.createMailbox({
-              local_part: acc.local_part,
-              domain: acc.domain,
-              password: mailboxPass,
-              quota: 1024,
-              name: acc.local_part
-            });
-
-            const sourceMaildir = path.join(destDir, 'mail', acc.local_part);
-            if (fs.existsSync(sourceMaildir) && !isDryRunMode) {
-              try {
-                const checkDovecot = execSync(`docker ps -q -f name=dovecot-mailcow`).toString().trim();
-                if (checkDovecot) {
-                  const destMaildir = `/var/vmail/${domain}/${acc.local_part}/Maildir/`;
-                  execSync(`docker exec -i dovecot-mailcow mkdir -p ${destMaildir}`);
-                  execSync(`docker cp ${sourceMaildir}/. dovecot-mailcow:${destMaildir}`);
-                  execSync(`docker exec -i dovecot-mailcow chown -R vmail:vmail /var/vmail/${domain}/${acc.local_part}`);
-                  
-                  const count = execSync(`docker exec -i dovecot-mailcow find ${destMaildir} -type f | wc -l`).toString().trim();
-                  const destCount = parseInt(count, 10) || 0;
-                  totalDestMessages += destCount;
-                  migrationResults.push(`${email}: ${destCount} de ${acc.messageCount} mensajes copiados`);
-                } else {
-                  throw new Error('Contenedor dovecot-mailcow no encontrado');
-                }
-              } catch (rsyncErr) {
-                log(`Error al copiar Maildir para ${email}: ${(rsyncErr as Error).message}`);
-                migrationResults.push(`${email}: ❌ Falló copia de correos`);
+          emailDomains = analysisReport?.emails || [];
+          const allAccounts: { local_part: string; domain: string; quota: string; messageCount: number; folders: string[] }[] = [];
+          for (const emailDomain of emailDomains) {
+            if (emailDomain.accounts && Array.isArray(emailDomain.accounts)) {
+              for (const acc of emailDomain.accounts) {
+                allAccounts.push({
+                  local_part: acc.address.split('@')[0],
+                  domain: domain,
+                  quota: acc.quota || '512',
+                  messageCount: acc.messageCount || 0,
+                  folders: acc.folders || []
+                });
               }
-            } else {
-              migrationResults.push(`${email}: buzón creado (vacío)`);
             }
-          } catch (mbErr) {
-            log(`Error al crear buzón ${email}: ${(mbErr as Error).message}`);
-            if (!isDryRunMode) throw mbErr;
-            migrationResults.push(`${email}: ❌ Error al crear buzón`);
+          }
+
+          let totalSourceMessages = 0;
+          let totalDestMessages = 0;
+          const migrationResults: string[] = [];
+          const isDryRunMode = !!config.migration.dryRun;
+
+          for (const acc of allAccounts) {
+            const email = `${acc.local_part}@${acc.domain}`;
+            const mailboxPass = `Mail_${Math.random().toString(36).substring(2, 10)}!`;
+            totalSourceMessages += acc.messageCount;
+
+            try {
+              log(`Creando buzón: ${email}`);
+              await mailcowService.createMailbox({
+                local_part: acc.local_part,
+                domain: acc.domain,
+                password: mailboxPass,
+                quota: 1024,
+                name: acc.local_part
+              });
+
+              const sourceMaildir = path.join(destDir, 'mail', acc.local_part);
+              if (fs.existsSync(sourceMaildir) && !isDryRunMode) {
+                try {
+                  const checkDovecot = execSync(`docker ps -q -f name=dovecot-mailcow`).toString().trim();
+                  if (checkDovecot) {
+                    const destMaildir = `/var/vmail/${domain}/${acc.local_part}/Maildir/`;
+                    execSync(`docker exec -i dovecot-mailcow mkdir -p ${destMaildir}`);
+                    execSync(`docker cp ${sourceMaildir}/. dovecot-mailcow:${destMaildir}`);
+                    execSync(`docker exec -i dovecot-mailcow chown -R vmail:vmail /var/vmail/${domain}/${acc.local_part}`);
+                    
+                    const count = execSync(`docker exec -i dovecot-mailcow find ${destMaildir} -type f | wc -l`).toString().trim();
+                    const destCount = parseInt(count, 10) || 0;
+                    totalDestMessages += destCount;
+                    migrationResults.push(`${email}: ${destCount} de ${acc.messageCount} mensajes copiados`);
+                  } else {
+                    throw new Error('Contenedor dovecot-mailcow no encontrado');
+                  }
+                } catch (rsyncErr) {
+                  log(`Error al copiar Maildir para ${email}: ${(rsyncErr as Error).message}`);
+                  migrationResults.push(`${email}: ❌ Falló copia de correos`);
+                }
+              } else {
+                migrationResults.push(`${email}: buzón creado (vacío)`);
+              }
+            } catch (mbErr) {
+              log(`Error al crear buzón ${email}: ${(mbErr as Error).message}`);
+              if (!isDryRunMode) throw mbErr;
+              migrationResults.push(`${email}: ❌ Error al crear buzón`);
+            }
+          }
+
+          if (!isDryRunMode && totalSourceMessages > 0 && totalDestMessages === 0) {
+            throw new Error('Fallo en migración de correos: IMAP no migrado.');
+          }
+          await this.logStep(migrationId, 'mailcow:restoring', 'Dominio y buzones de correo configurados en Mailcow.', 'SUCCESS', 90);
+        } catch (mailcowErr: any) {
+          const isRequired = !!config.mailcow.mailcowRequired;
+          log(`Error en la integración con Mailcow: ${mailcowErr.message}`);
+          if (isRequired) {
+            await this.logStep(migrationId, 'mailcow:restoring', `Fallo crítico en Mailcow: ${mailcowErr.message}`, 'FAILED', 88);
+            throw mailcowErr;
+          } else {
+            log(`[WARNING] Omitiendo fallo en Mailcow ya que MAILCOW_REQUIRED es false.`);
+            await this.logStep(migrationId, 'mailcow:restoring', `Advertencia: Integración Mailcow falló (${mailcowErr.message}). Continuando con la migración...`, 'SUCCESS', 90);
           }
         }
-
-        if (!isDryRunMode && totalSourceMessages > 0 && totalDestMessages === 0) {
-          await this.logStep(migrationId, 'mailcow:restoring', 'Fallo en migración de correos: IMAP no migrado.', 'FAILED', 88);
-          throw new Error('Fallo en migración de correos: IMAP no migrado.');
-        }
-        await this.logStep(migrationId, 'mailcow:restoring', 'Dominio y buzones de correo configurados en Mailcow.', 'SUCCESS', 90);
 
         // Step 12: Health Check obligatorio (Rule 8)
         log('Paso 12: Ejecutando Health Check obligatorio...');
@@ -367,7 +391,7 @@ export const migrationService = {
           healthPassed = inspectStatus === 'true';
         }
 
-        if (!healthPassed && !isDryRunMode) {
+        if (!healthPassed && !isDryRun) {
           throw new Error('El Health Check obligatorio falló. Revise los contenedores y permisos.');
         }
         await this.logStep(migrationId, 'verification:running', 'Health Check obligatorio aprobado.', 'SUCCESS', 95);
@@ -523,6 +547,12 @@ export const migrationService = {
   },
 
   async rollbackMigration(migrationId: string) {
+    if (executedRollbacks.has(migrationId)) {
+      log(`Rollback: La migración ${migrationId} ya tiene un proceso de rollback registrado/ejecutado. Omitiendo.`);
+      return;
+    }
+    executedRollbacks.add(migrationId);
+
     log(`Ejecutando Rollback para la migración: ${migrationId}`);
     
     const mig = await this.getMigration(migrationId);

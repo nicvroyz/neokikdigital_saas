@@ -8,4 +8,6 @@ export interface FrameworkPlugin {
   configureDatabaseConfig?(docRoot: string, dbConfig: any): Promise<void>;
   detectOriginalDomain?(containerName: string, docRoot: string): Promise<string | null>;
   runHealthCheck?(domain: string, containerName: string, docRoot: string): Promise<boolean>;
+  verifyDatabaseReady?(dbName: string, docRoot: string): Promise<void>;
+  ensureWordpressDatabaseConnection?(containerName: string): Promise<void>;
 }

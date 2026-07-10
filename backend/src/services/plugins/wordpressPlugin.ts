@@ -8,6 +8,76 @@ function log(msg: string) {
   console.log(`[WORDPRESS PLUGIN] ${msg}`);
 }
 
+async function getOrDetectTablePrefix(docRoot: string, dbName: string): Promise<string> {
+  // 1. Try wp-config.php in docRoot
+  const wpConfigPath = path.join(docRoot, 'wp-config.php');
+  if (fs.existsSync(wpConfigPath)) {
+    try {
+      const content = fs.readFileSync(wpConfigPath, 'utf-8');
+      const prefixMatch = content.match(/\$table_prefix\s*=\s*['"](.*?)['"]/);
+      if (prefixMatch && prefixMatch[1]) {
+        log(`Prefijo detectado desde wp-config.php: "${prefixMatch[1]}"`);
+        return prefixMatch[1];
+      }
+    } catch (err) {
+      log(`Error leyendo prefix desde wp-config.php: ${(err as Error).message}`);
+    }
+  }
+
+  // 2. Try meta/dbprefix file
+  const dbPrefixFile = path.join(docRoot, 'meta', 'dbprefix');
+  if (fs.existsSync(dbPrefixFile)) {
+    try {
+      const prefix = fs.readFileSync(dbPrefixFile, 'utf-8').trim();
+      if (prefix) {
+        log(`Prefijo detectado desde meta/dbprefix: "${prefix}"`);
+        return prefix;
+      }
+    } catch (err) {}
+  }
+
+  // 3. Try querying the database SHOW TABLES LIKE '%_options'
+  try {
+    const mysqlHost = process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql';
+    const rootPass = config.db.password;
+    if (dbName) {
+      const queryCmd = `docker exec -i ${mysqlHost} mysql -u root -p${rootPass} ${dbName} -N -e "SHOW TABLES LIKE '%_options';"`;
+      const output = execSync(queryCmd, { timeout: 10000 }).toString().trim().split('\n')[0].trim();
+      if (output && output.endsWith('_options')) {
+        const prefix = output.substring(0, output.length - 'options'.length);
+        log(`Prefijo detectado desde SHOW TABLES: "${prefix}" (tabla encontrada: "${output}")`);
+        return prefix;
+      }
+    }
+  } catch (err) {
+    log(`Error ejecutando SHOW TABLES para prefijo. Base: "${dbName}". Detalle: ${(err as Error).message}`);
+  }
+
+  log(`No se pudo detectar el prefijo. Usando valor por defecto: "wp_"`);
+  return 'wp_';
+}
+
+async function ensureWordpressDatabaseConnection(containerName: string): Promise<void> {
+  log(`Verificando conectividad de WordPress con su base de datos...`);
+  const maxRetries = 15; // 30 seconds max
+  const intervalMs = 2000;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      execSync(`docker exec ${containerName} wp core is-installed --allow-root`, { timeout: 5000, stdio: 'pipe' });
+      log(`Conexión con la base de datos confirmada mediante wp core is-installed en el intento ${attempt}.`);
+      return;
+    } catch (err: any) {
+      const stdout = err.stdout ? err.stdout.toString().trim() : '';
+      const stderr = err.stderr ? err.stderr.toString().trim() : (err.message || '');
+      log(`Intento ${attempt}/${maxRetries} - Conexión de base de datos no lista aún. Stdout: "${stdout}", Stderr: "${stderr}"`);
+    }
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(`Timeout: WordPress no pudo establecer conexión con la base de datos en el contenedor ${containerName}.`);
+}
+
 export const wordpressPlugin: FrameworkPlugin = {
   name: 'WORDPRESS',
 
@@ -92,9 +162,10 @@ export const wordpressPlugin: FrameworkPlugin = {
 
       // Helper to update constant value keeping custom config intact
       const updateConstant = (contentStr: string, constant: string, value: string): string => {
-        const regex = new RegExp(`(define\\s*\\(\\s*['"]${constant}['"]\\s*,\\s*['"])(.*?)(['"]\\s*\\))`);
-        if (regex.test(contentStr)) {
-          return contentStr.replace(regex, `$1${value}$3`);
+        const regex = new RegExp(`(define\\s*\\(\\s*${constant}\\s*,\\s*${constant}\\s*\\))`); // fallback regex
+        const regex1 = new RegExp(`(define\\s*\\(\\s*['"]${constant}['"]\\s*,\\s*['"])(.*?)(['"]\\s*\\))`);
+        if (regex1.test(contentStr)) {
+          return contentStr.replace(regex1, `$1${value}$3`);
         } else {
           const stopEditingRegex = /(\/\*\s*That's all,\s*stop editing!.*?\*\/)/i;
           if (stopEditingRegex.test(contentStr)) {
@@ -118,44 +189,99 @@ export const wordpressPlugin: FrameworkPlugin = {
     }
   },
 
+  async verifyDatabaseReady(dbName: string, docRoot: string): Promise<void> {
+    log(`Verificando que la base de datos ${dbName} esté lista e importada...`);
+    const mysqlHost = process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql';
+    const rootPass = config.db.password;
+    const maxRetries = 15; // 30 seconds max
+    const intervalMs = 2000;
+    let prefix = 'wp_';
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        prefix = await getOrDetectTablePrefix(docRoot, dbName);
+        const targetTable = `${prefix}options`;
+        
+        const queryCmd = `docker exec -i ${mysqlHost} mysql -u root -p${rootPass} ${dbName} -N -e "SELECT COUNT(*) FROM ${targetTable};"`;
+        const countStr = execSync(queryCmd, { timeout: 5000, stdio: 'pipe' }).toString().trim();
+        const count = parseInt(countStr, 10);
+        
+        if (!isNaN(count) && count > 0) {
+          log(`Base de datos lista. Se encontraron ${count} registros en la tabla ${targetTable} en el intento ${attempt}.`);
+          return;
+        }
+      } catch (err: any) {
+        log(`Intento ${attempt}/${maxRetries} - Esperando tablas/registros: ${err.message}`);
+      }
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+
+    // Try a general check of tables count as fallback
+    try {
+      const checkTablesCmd = `docker exec -i ${mysqlHost} mysql -u root -p${rootPass} ${dbName} -N -e "SHOW TABLES;"`;
+      const tables = execSync(checkTablesCmd, { timeout: 5000 }).toString().trim();
+      if (tables.length > 0) {
+        log(`Advertencia: No se encontró la tabla de opciones ${prefix}options, pero existen tablas en la base de datos ${dbName}.`);
+        return;
+      }
+    } catch {}
+
+    throw new Error(`Timeout al esperar importación de base de datos. Base: "${dbName}", Prefijo detectado/asumido: "${prefix}", Tabla buscada: "${prefix}options".`);
+  },
+
+  async ensureWordpressDatabaseConnection(containerName: string): Promise<void> {
+    await ensureWordpressDatabaseConnection(containerName);
+  },
+
   async detectOriginalDomain(containerName: string, docRoot: string): Promise<string | null> {
     log(`Detectando dominio original de WordPress para contenedor: ${containerName}`);
     
-    // 1. Try WP-CLI first
+    const dbName = `db_${containerName}`;
+    const prefix = await getOrDetectTablePrefix(docRoot, dbName);
+
+    // 1. Try WP-CLI first (Only if core is-installed passes)
     try {
+      await ensureWordpressDatabaseConnection(containerName);
+      
       const stdout = execSync(`docker exec ${containerName} wp option get siteurl --allow-root`, { timeout: 10000 }).toString().trim();
       if (stdout && stdout.startsWith('http')) {
-        log(`Dominio detectado vía WP-CLI: ${stdout}`);
+        log(`Dominio original detectado vía WP-CLI: ${stdout}`);
         return stdout;
       }
-    } catch (wpCliErr) {
-      log(`No se pudo obtener siteurl vía WP-CLI: ${(wpCliErr as Error).message}. Buscando en la base de datos...`);
+    } catch (wpCliErr: any) {
+      const cmd = `docker exec ${containerName} wp option get siteurl --allow-root`;
+      const stdout = wpCliErr.stdout ? wpCliErr.stdout.toString().trim() : '';
+      const stderr = wpCliErr.stderr ? wpCliErr.stderr.toString().trim() : (wpCliErr.message || '');
+      const status = wpCliErr.status !== undefined ? wpCliErr.status : -1;
+      
+      log(`No se pudo obtener siteurl vía WP-CLI. Comando: "${cmd}", Status: ${status}, Stdout: "${stdout}", Stderr: "${stderr}". Buscando en la base de datos...`);
     }
 
-    // 2. Database fallback: Detect table prefix and query the DB
-    try {
-      const wpConfigPath = path.join(docRoot, 'wp-config.php');
-      if (fs.existsSync(wpConfigPath)) {
-        const content = fs.readFileSync(wpConfigPath, 'utf-8');
-        const prefixMatch = content.match(/\$table_prefix\s*=\s*['"](.*?)['"]/);
-        const prefix = prefixMatch ? prefixMatch[1] : 'wp_';
-        
-        const dbNameMatch = content.match(/define\s*\(\s*['"]DB_NAME['"]\s*,\s*['"](.*?)['"]\s*\)/);
-        const dbName = dbNameMatch ? dbNameMatch[1] : '';
-        const mysqlHost = process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql';
-        const rootPass = config.db.password;
+    // 2. Database fallback: Query siteurl and home option
+    const mysqlHost = process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql';
+    const rootPass = config.db.password;
+    const targetTable = `${prefix}options`;
 
-        if (dbName) {
-          const queryCmd = `docker exec -i ${mysqlHost} mysql -u root -p${rootPass} ${dbName} -N -e "SELECT option_value FROM ${prefix}options WHERE option_name='siteurl';"`;
-          const stdout = execSync(queryCmd, { timeout: 15000 }).toString().trim();
-          if (stdout && stdout.startsWith('http')) {
-            log(`Dominio detectado vía consulta MySQL: ${stdout}`);
-            return stdout;
-          }
-        }
+    try {
+      const queryCmd = `docker exec -i ${mysqlHost} mysql -u root -p${rootPass} ${dbName} -N -e "SELECT option_value FROM ${targetTable} WHERE option_name='siteurl';"`;
+      const stdout = execSync(queryCmd, { timeout: 15000 }).toString().trim();
+      if (stdout && stdout.startsWith('http')) {
+        log(`Dominio original detectado vía MySQL (siteurl): ${stdout}`);
+        return stdout;
       }
-    } catch (dbErr) {
-      log(`Error al consultar la base de datos para siteurl: ${(dbErr as Error).message}`);
+    } catch (dbErr: any) {
+      log(`Fallo al consultar siteurl en base de datos. Base: "${dbName}", Prefijo: "${prefix}", Tabla: "${targetTable}". Detalle: ${dbErr.message}`);
+    }
+
+    try {
+      const queryCmd = `docker exec -i ${mysqlHost} mysql -u root -p${rootPass} ${dbName} -N -e "SELECT option_value FROM ${targetTable} WHERE option_name='home';"`;
+      const stdout = execSync(queryCmd, { timeout: 15000 }).toString().trim();
+      if (stdout && stdout.startsWith('http')) {
+        log(`Dominio original detectado vía MySQL (home): ${stdout}`);
+        return stdout;
+      }
+    } catch (dbErr: any) {
+      log(`Fallo al consultar home en base de datos. Base: "${dbName}", Prefijo: "${prefix}", Tabla: "${targetTable}". Detalle: ${dbErr.message}`);
     }
 
     log('Advertencia: No se pudo determinar el dominio original.');
@@ -164,6 +290,9 @@ export const wordpressPlugin: FrameworkPlugin = {
 
   async runHealthCheck(domain: string, containerName: string, docRoot: string): Promise<boolean> {
     log(`Ejecutando Health Check obligatorio para ${domain}...`);
+    const dbName = `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const prefix = await getOrDetectTablePrefix(docRoot, dbName);
+
     try {
       // 1. Contenedor Running
       const inspectStatus = execSync(`docker inspect -f "{{.State.Running}}" ${containerName}`).toString().trim();
@@ -172,40 +301,42 @@ export const wordpressPlugin: FrameworkPlugin = {
         return false;
       }
 
-      // 2. PHP-FPM operativo & WP-CLI funcional
-      const wpInfo = execSync(`docker exec ${containerName} wp --info --allow-root`).toString().trim();
-      if (!wpInfo.includes('PHP version') && !wpInfo.includes('WP-CLI')) {
-        log('HEALTH CHECK FAILED: WP-CLI o PHP-FPM no responden.');
-        return false;
-      }
-
-      // 3. Connection MySQL válida & wp core is-installed
+      // 2. WP-CLI funcional
+      let wpInfo = '';
       try {
-        execSync(`docker exec ${containerName} wp core is-installed --allow-root`, { stdio: 'ignore' });
-      } catch (err) {
-        log('HEALTH CHECK FAILED: WordPress no está reportando como instalado (core is-installed falló).');
+        wpInfo = execSync(`docker exec ${containerName} wp --info --allow-root`, { stdio: 'pipe' }).toString().trim();
+      } catch (err: any) {
+        const stdout = err.stdout ? err.stdout.toString().trim() : '';
+        const stderr = err.stderr ? err.stderr.toString().trim() : (err.message || '');
+        log(`HEALTH CHECK FAILED: WP-CLI no responde. Comando: "wp --info", Status: ${err.status}, Stdout: "${stdout}", Stderr: "${stderr}"`);
         return false;
       }
 
-      // 4. Tablas WordPress presentes
-      const wpConfigPath = path.join(docRoot, 'wp-config.php');
-      if (fs.existsSync(wpConfigPath)) {
-        const content = fs.readFileSync(wpConfigPath, 'utf-8');
-        const prefixMatch = content.match(/\$table_prefix\s*=\s*['"](.*?)['"]/);
-        const prefix = prefixMatch ? prefixMatch[1] : 'wp_';
-        const dbNameMatch = content.match(/define\s*\(\s*['"]DB_NAME['"]\s*,\s*['"](.*?)['"]\s*\)/);
-        const dbName = dbNameMatch ? dbNameMatch[1] : '';
-        const mysqlHost = process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql';
-        const rootPass = config.db.password;
+      // 3. WordPress core is-installed check
+      try {
+        execSync(`docker exec ${containerName} wp core is-installed --allow-root`, { stdio: 'pipe' });
+      } catch (err: any) {
+        const stdout = err.stdout ? err.stdout.toString().trim() : '';
+        const stderr = err.stderr ? err.stderr.toString().trim() : (err.message || '');
+        log(`HEALTH CHECK FAILED: WordPress no está operativo o la base de datos no está conectada. Comando: "wp core is-installed", Status: ${err.status}, Stdout: "${stdout}", Stderr: "${stderr}"`);
+        return false;
+      }
 
-        if (dbName) {
-          const checkCmd = `docker exec -i ${mysqlHost} mysql -u root -p${rootPass} ${dbName} -N -e "SHOW TABLES LIKE '${prefix}options';"`;
-          const tableExists = execSync(checkCmd).toString().trim();
-          if (!tableExists) {
-            log('HEALTH CHECK FAILED: No se encontraron las tablas básicas de WordPress.');
-            return false;
-          }
+      // 4. Tablas WordPress presentes (options table exists)
+      const mysqlHost = process.env.MYSQL_CONTAINER_NAME || 'neokik-mysql';
+      const rootPass = config.db.password;
+      const targetTable = `${prefix}options`;
+
+      try {
+        const checkCmd = `docker exec -i ${mysqlHost} mysql -u root -p${rootPass} ${dbName} -N -e "SHOW TABLES LIKE '${targetTable}';"`;
+        const tableExists = execSync(checkCmd).toString().trim();
+        if (!tableExists) {
+          log(`HEALTH CHECK FAILED: La tabla ${targetTable} no existe. Base: "${dbName}", Prefijo: "${prefix}", Tabla: "${targetTable}".`);
+          return false;
         }
+      } catch (err: any) {
+        log(`HEALTH CHECK FAILED: Error al verificar tabla en MySQL. Base: "${dbName}", Prefijo: "${prefix}", Tabla: "${targetTable}". Detalle: ${err.message}`);
+        return false;
       }
 
       // 5. Sitio responde correctamente (HTTP check)

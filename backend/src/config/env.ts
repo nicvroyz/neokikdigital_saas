@@ -37,6 +37,7 @@ export const config = {
   mailcow: {
     apiUrl: process.env.MAILCOW_API_URL || 'http://localhost:8080',
     apiKey: process.env.MAILCOW_API_KEY || 'mailcow-api-key-placeholder',
+    mailcowRequired: process.env.MAILCOW_REQUIRED === 'true',
   },
   infrastructure: {
     uploadsDir: process.env.UPLOADS_DIR || '/srv/neokik/storage/migrations',

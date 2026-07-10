@@ -183,6 +183,9 @@ export const wordpressPlugin: FrameworkPlugin = {
       // Disable forced SSL database connection flags from cPanel migrations to allow standard docker network connections
       content = content.replace(/define\s*\(\s*['"]MYSQL_CLIENT_FLAGS['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_CLIENT_FLAGS', 0)");
       content = content.replace(/define\s*\(\s*['"]MYSQL_SSL['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_SSL', false)");
+      content = content.replace(/define\s*\(\s*['"]MYSQL_SSL_CA['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_SSL_CA', '')");
+      content = content.replace(/define\s*\(\s*['"]MYSQL_SSL_KEY['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_SSL_KEY', '')");
+      content = content.replace(/define\s*\(\s*['"]MYSQL_SSL_CERT['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_SSL_CERT', '')");
 
       fs.writeFileSync(wpConfigPath, content, 'utf-8');
       log('wp-config.php configurado exitosamente.');

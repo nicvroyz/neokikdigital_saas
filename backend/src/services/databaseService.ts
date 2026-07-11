@@ -169,20 +169,40 @@ export const databaseService = {
         activeSqlPath = decompressedPath;
       }
 
+      // Log SQL dump path and size
+      const stats = fs.statSync(dumpFilePath);
+      log(`[SQL IMPORT DIAGNOSTIC] Archivo SQL detectado: ${dumpFilePath}`);
+      log(`[SQL IMPORT DIAGNOSTIC] Tamaño del archivo SQL: ${stats.size} bytes (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+
       // 3. Sanitize SQL dump
       sanitizedPath = activeSqlPath + '.sanitized';
       log(`Sanitizando volcado SQL: ${activeSqlPath}`);
       await sanitizeSQLDump(activeSqlPath, sanitizedPath);
 
       // 4. Import the sanitized SQL dump
+      log(`[SQL IMPORT DIAGNOSTIC] Ejecutando comando de importación: docker exec -i ${mysqlContainer} mysql -u root -p******** ${dbName} < ${sanitizedPath}`);
       const importFd = fs.openSync(sanitizedPath, 'r');
-      execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, dbName], { stdio: [importFd, 'ignore', 'ignore'] });
-      fs.closeSync(importFd);
+      let importExitCode = 0;
+      try {
+        execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, dbName], { stdio: [importFd, 'ignore', 'ignore'] });
+        log(`[SQL IMPORT DIAGNOSTIC] Comando de importación completado exitosamente (exit status 0).`);
+      } catch (err: any) {
+        importExitCode = err.status !== undefined ? err.status : -1;
+        log(`[SQL IMPORT DIAGNOSTIC] Comando de importación falló con exit status ${importExitCode}. Detalle: ${err.message}`);
+        throw err;
+      } finally {
+        fs.closeSync(importFd);
+      }
 
       log(`Validando importación para la base de datos: ${dbName}...`);
       const stdout = execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, dbName, '-e', 'SHOW TABLES;'], { stdio: 'pipe' }).toString().trim();
 
       const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean);
+      log(`[SQL IMPORT DIAGNOSTIC] Tablas encontradas en la base de datos (${lines.length > 0 ? lines.length - 1 : 0} tablas):`);
+      for (const t of lines) {
+        log(`[SQL IMPORT DIAGNOSTIC] Tabla: ${t}`);
+      }
+
       if (lines.length <= 1) { // SHOW TABLES outputs a header line, so length <= 1 means 0 tables!
         throw new Error('La base de datos importada no contiene tablas.');
       }

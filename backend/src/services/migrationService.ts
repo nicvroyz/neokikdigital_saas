@@ -206,12 +206,41 @@ export const migrationService = {
 
         // Step 8: Importar SQL dump (Rule 7)
         if (hasDatabases) {
-          // Look for SQL dump in backup
-          const sqlDir = path.join(destDir, 'mysql');
+          // Resolve backup root (handles single username directory wrapper in cPanel)
+          const entries = fs.readdirSync(destDir).filter(e => !e.startsWith('.'));
+          const backupRoot = entries.length === 1 && fs.statSync(path.join(destDir, entries[0])).isDirectory()
+            ? path.join(destDir, entries[0])
+            : destDir;
+
+          const sqlDir = path.join(backupRoot, 'mysql');
           let sqlFile = '';
           if (fs.existsSync(sqlDir)) {
             const files = fs.readdirSync(sqlDir).filter(f => f.endsWith('.sql') || f.endsWith('.sql.gz'));
             if (files.length > 0) sqlFile = path.join(sqlDir, files[0]);
+          }
+
+          // Fallback: search recursively for any .sql / .sql.gz files in destDir
+          if (!sqlFile) {
+            const findSqlRecursive = (dir: string): string => {
+              try {
+                const files = fs.readdirSync(dir);
+                for (const file of files) {
+                  const fullPath = path.join(dir, file);
+                  const stat = fs.statSync(fullPath);
+                  if (stat.isDirectory()) {
+                    if (['homedir', 'public_html', 'mail', 'logs', 'etc', 'ssl'].includes(file)) continue;
+                    const found = findSqlRecursive(fullPath);
+                    if (found) return found;
+                  } else if (file.endsWith('.sql') || file.endsWith('.sql.gz')) {
+                    return fullPath;
+                  }
+                }
+              } catch (err) {
+                log(`Advertencia en búsqueda recursiva de SQL en ${dir}: ${(err as Error).message}`);
+              }
+              return '';
+            };
+            sqlFile = findSqlRecursive(destDir);
           }
 
           if (sqlFile) {

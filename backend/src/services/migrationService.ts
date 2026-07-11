@@ -159,7 +159,7 @@ export const migrationService = {
         await storageService.copy(srcWebPath, docRoot);
         await this.logStep(migrationId, 'site:deploying', 'Archivos del sitio desplegados correctamente.', 'SUCCESS', 40);
 
-        // Step 4: Create MySQL Database / User / Import SQL (Rule 7)
+        // Step 4: Create MySQL Database / User (Rule 7)
         const dbName = `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
         const dbUser = `user_${domain.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 10)}`;
         const dbPass = `Pass_${randomBytes(4).toString('hex')}!`;
@@ -178,7 +178,34 @@ export const migrationService = {
           await this.logStep(migrationId, 'database:restoring', 'Creando base de datos y usuario en contenedor MySQL...', 'RUNNING', 45);
           await databaseService.createDatabase(dbName, dbUser, dbPass);
           await query('UPDATE migrations SET rollback_step = \'DROP_DATABASE\' WHERE id = $1', [migrationId]);
+          await this.logStep(migrationId, 'database:restoring', 'Base de datos MySQL creada.', 'SUCCESS', 48);
+        } else {
+          log('Omitiendo creación de base de datos MySQL.');
+          await this.logStep(migrationId, 'database:restoring', 'No se detectaron bases de datos. Omitiendo paso de base de datos.', 'SUCCESS', 48);
+        }
 
+        // Step 5: Configurar wp-config.php (Rule 6)
+        if (plugin && typeof plugin.configureDatabaseConfig === 'function') {
+          log('Paso 5: Configurando archivos de conexión a base de datos...');
+          await this.logStep(migrationId, 'plugin:executing', 'Configurando archivos de conexión a base de datos (wp-config)...', 'RUNNING', 52);
+          await plugin.configureDatabaseConfig(docRoot, dbConfig);
+        }
+
+        // Step 6: Crear contenedor
+        log('Paso 6: Creando contenedor Docker...');
+        await this.logStep(migrationId, 'container:creating', 'Creando y enlazando contenedor Docker con volumenes...', 'RUNNING', 55);
+        await dockerService.createContainer(domain, mig.detected_project_type || 'WORDPRESS', '8.2', dbName, dbUser, dbPass);
+        await query('UPDATE migrations SET rollback_step = \'REMOVE_CONTAINER\' WHERE id = $1', [migrationId]);
+
+        // Step 7: Esperar que el contenedor esté listo (Rule 3)
+        const containerName = domain.replace(/[^a-zA-Z0-9]/g, '_');
+        log(`Paso 7: Esperando que el contenedor ${containerName} esté listo...`);
+        await this.logStep(migrationId, 'container:creating', 'Esperando que los servicios internos del contenedor estén listos...', 'RUNNING', 60);
+        await dockerService.waitForContainerReady(containerName, mig.detected_project_type === 'WORDPRESS');
+        await this.logStep(migrationId, 'container:creating', 'Contenedor Docker iniciado y enlazado correctamente.', 'SUCCESS', 63);
+
+        // Step 8: Importar SQL dump (Rule 7)
+        if (hasDatabases) {
           // Look for SQL dump in backup
           const sqlDir = path.join(destDir, 'mysql');
           let sqlFile = '';
@@ -188,50 +215,30 @@ export const migrationService = {
           }
 
           if (sqlFile) {
-            await this.logStep(migrationId, 'database:restoring', `Importando archivo de base de datos ${path.basename(sqlFile)}...`, 'RUNNING', 50);
+            log('Paso 8: Importando base de datos MySQL...');
+            await this.logStep(migrationId, 'database:restoring', `Importando archivo de base de datos ${path.basename(sqlFile)}...`, 'RUNNING', 65);
             await databaseService.importSQLDump(dbName, sqlFile, mig.detected_project_type);
 
             if (plugin && typeof plugin.verifyDatabaseReady === 'function') {
-              await this.logStep(migrationId, 'database:restoring', 'Esperando que las tablas se importen completamente en MySQL...', 'RUNNING', 52);
+              await this.logStep(migrationId, 'database:restoring', 'Esperando que las tablas se importen completamente en MySQL...', 'RUNNING', 68);
               await plugin.verifyDatabaseReady(dbName, docRoot);
             }
           }
-          await this.logStep(migrationId, 'database:restoring', 'Base de datos MySQL configurada e importada.', 'SUCCESS', 55);
+          await this.logStep(migrationId, 'database:restoring', 'Base de datos MySQL importada y lista.', 'SUCCESS', 70);
         } else {
-          log('Omitiendo creación de base de datos MySQL.');
-          await this.logStep(migrationId, 'database:restoring', 'No se detectaron bases de datos. Omitiendo paso de base de datos.', 'SUCCESS', 55);
+          await this.logStep(migrationId, 'database:restoring', 'Omitiendo importación de base de datos MySQL.', 'SUCCESS', 70);
         }
 
-        // Step 5: Configurar wp-config.php (Rule 6)
-        if (plugin && typeof plugin.configureDatabaseConfig === 'function') {
-          log('Paso 5: Configurando archivos de conexión a base de datos...');
-          await this.logStep(migrationId, 'plugin:executing', 'Configurando archivos de conexión a base de datos (wp-config)...', 'RUNNING', 60);
-          await plugin.configureDatabaseConfig(docRoot, dbConfig);
-        }
-
-        // Step 6: Crear contenedor
-        log('Paso 6: Creando contenedor Docker...');
-        await this.logStep(migrationId, 'container:creating', 'Creando y enlazando contenedor Docker con volumenes...', 'RUNNING', 65);
-        await dockerService.createContainer(domain, mig.detected_project_type || 'WORDPRESS', '8.2', dbName, dbUser, dbPass);
-        await query('UPDATE migrations SET rollback_step = \'REMOVE_CONTAINER\' WHERE id = $1', [migrationId]);
-
-        // Step 7: Esperar que el contenedor esté listo (Rule 3)
-        const containerName = domain.replace(/[^a-zA-Z0-9]/g, '_');
-        log(`Paso 7: Esperando que el contenedor ${containerName} esté listo...`);
-        await this.logStep(migrationId, 'container:creating', 'Esperando que los servicios internos del contenedor estén listos...', 'RUNNING', 70);
-        await dockerService.waitForContainerReady(containerName, mig.detected_project_type === 'WORDPRESS');
-        await this.logStep(migrationId, 'container:creating', 'Contenedor Docker iniciado y enlazado correctamente.', 'SUCCESS', 72);
-
-        // Step 8: Detectar dominio original (Rule 4)
+        // Step 9: Detectar dominio original (Rule 4)
         let originalDomain: string | null = null;
         if (plugin && typeof plugin.detectOriginalDomain === 'function') {
-          log('Paso 8: Detectando dominio original...');
+          log('Paso 9: Detectando dominio original...');
           originalDomain = await plugin.detectOriginalDomain(containerName, docRoot);
         }
 
-        // Step 9: Ejecutar wp search-replace y cache flush (Rule 7)
+        // Step 10: Ejecutar wp search-replace y cache flush (Rule 7)
         if (mig.detected_project_type === 'WORDPRESS') {
-          log('Paso 9: Ejecutando comandos post-migración (WP-CLI)...');
+          log('Paso 10: Ejecutando comandos post-migración (WP-CLI)...');
           await this.logStep(migrationId, 'plugin:executing', 'Ejecutando reemplazo de URL y limpieza de caché...', 'RUNNING', 75);
 
           if (plugin && typeof plugin.ensureWordpressDatabaseConnection === 'function') {
@@ -268,9 +275,9 @@ export const migrationService = {
           }
         }
 
-        // Step 9.5: Reparación de permisos WordPress (PermissionFixer)
+        // Step 10.5: Reparación de permisos WordPress (PermissionFixer)
         if (plugin && typeof plugin.fixPermissions === 'function') {
-          log('Paso 9.5: Reparando permisos del sitio web...');
+          log('Paso 10.5: Reparando permisos del sitio web...');
           await this.logStep(migrationId, 'plugin:executing', 'Reparando permisos de archivos y carpetas del sitio...', 'RUNNING', 78);
           await plugin.fixPermissions(containerName, siteRoot);
         }
@@ -291,15 +298,15 @@ export const migrationService = {
         }
         await this.logStep(migrationId, 'plugin:executing', 'Plugins del framework configurados y comandos ejecutados.', 'SUCCESS', 78);
 
-        // Step 10: Configure SSL on Proxy Caddy (80%)
-        log('Paso 10: Configurando Caddy/SSL...');
+        // Step 11: Configure SSL on Proxy Caddy (80%)
+        log('Paso 11: Configurando Caddy/SSL...');
         await this.logStep(migrationId, 'ssl:generating', 'Configurando enrutamiento seguro y recargando Caddy...', 'RUNNING', 80);
         await hostingService.applyCaddyConfig(domain, docRoot, false);
         await sslService.configureSSL(domain);
         await this.logStep(migrationId, 'ssl:generating', 'Enrutamiento SSL Let\'s Encrypt configurado.', 'SUCCESS', 84);
 
-        // Step 11: Mailcow integration (85%)
-        log('Paso 11: Integración Mailcow...');
+        // Step 12: Mailcow integration (85%)
+        log('Paso 12: Integración Mailcow...');
         await this.logStep(migrationId, 'mailcow:restoring', 'Creando dominio y buzones de correo en Mailcow API...', 'RUNNING', 85);
         
         try {
@@ -402,8 +409,8 @@ export const migrationService = {
           }
         }
 
-        // Step 12: Health Check obligatorio (Rule 8)
-        log('Paso 12: Ejecutando Health Check obligatorio...');
+        // Step 13: Health Check obligatorio (Rule 8)
+        log('Paso 13: Ejecutando Health Check obligatorio...');
         await this.logStep(migrationId, 'verification:running', 'Ejecutando verificaciones de salud y seguridad...', 'RUNNING', 92);
         
         let healthPassed = true;

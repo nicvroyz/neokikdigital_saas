@@ -58,14 +58,30 @@ async function getOrDetectTablePrefix(docRoot: string, dbName: string): Promise<
 }
 
 async function ensureWordpressDatabaseConnection(containerName: string): Promise<void> {
-  log(`Verificando conectividad de WordPress con su base de datos...`);
+  log(`Verificando conectividad de WordPress con su base de datos usando PHP/MySQLi...`);
   const maxRetries = 15; // 30 seconds max
   const intervalMs = 2000;
 
+  const phpDbCheckCmd = `
+    $h = getenv('WORDPRESS_DB_HOST') ?: 'neokik-mysql';
+    $u = getenv('WORDPRESS_DB_USER');
+    $p = getenv('WORDPRESS_DB_PASSWORD');
+    $n = getenv('WORDPRESS_DB_NAME');
+    if (file_exists('/var/www/html/wp-config.php')) {
+      @include '/var/www/html/wp-config.php';
+      if (defined('DB_HOST')) $h = DB_HOST;
+      if (defined('DB_USER')) $u = DB_USER;
+      if (defined('DB_PASSWORD')) $p = DB_PASSWORD;
+      if (defined('DB_NAME')) $n = DB_NAME;
+    }
+    $m = @new mysqli($h, $u, $p, $n);
+    exit($m->connect_errno);
+  `.replace(/\s+/g, ' ').trim();
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      execSync(`docker exec ${containerName} wp core is-installed --allow-root`, { timeout: 5000, stdio: 'pipe' });
-      log(`Conexión con la base de datos confirmada mediante wp core is-installed en el intento ${attempt}.`);
+      execSync(`docker exec ${containerName} php -r "${phpDbCheckCmd.replace(/"/g, '\\"')}"`, { timeout: 5000, stdio: 'pipe' });
+      log(`Conexión con la base de datos confirmada mediante PHP/MySQLi en el intento ${attempt}.`);
       return;
     } catch (err: any) {
       const stdout = err.stdout ? err.stdout.toString().trim() : '';

@@ -197,32 +197,52 @@ export const dockerService = {
     const intervalMs = 3000;
     let isContainerRunning = false;
 
+    const phpDbCheckCmd = `
+      $h = getenv('WORDPRESS_DB_HOST') ?: 'neokik-mysql';
+      $u = getenv('WORDPRESS_DB_USER');
+      $p = getenv('WORDPRESS_DB_PASSWORD');
+      $n = getenv('WORDPRESS_DB_NAME');
+      if (file_exists('/var/www/html/wp-config.php')) {
+        @include '/var/www/html/wp-config.php';
+        if (defined('DB_HOST')) $h = DB_HOST;
+        if (defined('DB_USER')) $u = DB_USER;
+        if (defined('DB_PASSWORD')) $p = DB_PASSWORD;
+        if (defined('DB_NAME')) $n = DB_NAME;
+      }
+      $m = @new mysqli($h, $u, $p, $n);
+      exit($m->connect_errno);
+    `.replace(/\s+/g, ' ').trim();
+
     while (Date.now() - startTime < timeoutMs) {
       try {
         const inspect = execFileSync('docker', ['inspect', '-f', '{{.State.Running}}', containerName], { stdio: 'pipe' }).toString().trim();
         if (inspect === 'true') {
           isContainerRunning = true;
+
+          // 1. Verify PHP execution works first
+          try {
+            const phpInfo = execFileSync('docker', ['exec', containerName, 'php', '-v'], { timeout: 3000, stdio: 'pipe' }).toString().trim();
+            if (!phpInfo.includes('PHP')) {
+              throw new Error('PHP no está operativo en el contenedor.');
+            }
+          } catch (phpErr) {
+            log(`Contenedor activo pero la validación PHP falló: ${(phpErr as Error).message}`);
+            await new Promise(resolve => setTimeout(resolve, intervalMs));
+            continue;
+          }
+
+          // 2. For WordPress containers, verify MySQL connection works via PHP/MySQLi
           if (isWordpress) {
             try {
-              const dbCheck = execFileSync('docker', ['exec', containerName, 'wp', 'db', 'check', '--allow-root'], { timeout: 5000, stdio: 'pipe' }).toString().trim();
-              if (dbCheck.toLowerCase().includes('success')) {
-                log(`Contenedor WordPress ${containerName} está completamente operativo.`);
-                return;
-              }
+              execFileSync('docker', ['exec', containerName, 'php', '-r', phpDbCheckCmd], { timeout: 5000, stdio: 'pipe' });
+              log(`Contenedor WordPress ${containerName} está completamente operativo y con conexión a base de datos confirmada.`);
+              return;
             } catch (dbErr) {
-              log(`Contenedor activo pero WP DB check falló: ${(dbErr as Error).message}`);
+              log(`Contenedor activo y PHP funcionando, pero la conectividad MySQL mediante PHP/MySQLi falló: ${(dbErr as Error).message}`);
             }
           } else {
-            // General PHP check
-            try {
-              const info = execFileSync('docker', ['exec', containerName, 'php', '-v'], { timeout: 3000, stdio: 'pipe' }).toString().trim();
-              if (info.includes('PHP')) {
-                log(`Contenedor PHP ${containerName} está operativo.`);
-                return;
-              }
-            } catch (phpErr) {
-              log(`Contenedor activo pero la validación PHP falló: ${(phpErr as Error).message}`);
-            }
+            log(`Contenedor PHP ${containerName} está operativo.`);
+            return;
           }
         } else {
           log(`Contenedor ${containerName} no se está ejecutando actualmente.`);

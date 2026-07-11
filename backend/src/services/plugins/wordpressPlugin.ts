@@ -1,7 +1,7 @@
 import { FrameworkPlugin } from './pluginInterface';
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { config } from '../../config/env';
 
 function log(msg: string) {
@@ -80,7 +80,7 @@ async function ensureWordpressDatabaseConnection(containerName: string): Promise
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      execSync(`docker exec ${containerName} php -r "${phpDbCheckCmd.replace(/"/g, '\\"')}"`, { timeout: 5000, stdio: 'pipe' });
+      execFileSync('docker', ['exec', containerName, 'php', '-r', phpDbCheckCmd], { timeout: 5000, stdio: 'pipe' });
       log(`Conexión con la base de datos confirmada mediante PHP/MySQLi en el intento ${attempt}.`);
       return;
     } catch (err: any) {

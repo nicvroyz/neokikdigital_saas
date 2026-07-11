@@ -243,15 +243,17 @@ export const migrationService = {
             sqlFile = findSqlRecursive(destDir);
           }
 
-          if (sqlFile) {
-            log('Paso 8: Importando base de datos MySQL...');
-            await this.logStep(migrationId, 'database:restoring', `Importando archivo de base de datos ${path.basename(sqlFile)}...`, 'RUNNING', 65);
-            await databaseService.importSQLDump(dbName, sqlFile, mig.detected_project_type);
+          if (!sqlFile) {
+            throw new Error('No se encontró ningún archivo de volcado de base de datos (.sql o .sql.gz) en el respaldo cargado.');
+          }
 
-            if (plugin && typeof plugin.verifyDatabaseReady === 'function') {
-              await this.logStep(migrationId, 'database:restoring', 'Esperando que las tablas se importen completamente en MySQL...', 'RUNNING', 68);
-              await plugin.verifyDatabaseReady(dbName, docRoot);
-            }
+          log('Paso 8: Importando base de datos MySQL...');
+          await this.logStep(migrationId, 'database:restoring', `Importando archivo de base de datos ${path.basename(sqlFile)}...`, 'RUNNING', 65);
+          await databaseService.importSQLDump(dbName, sqlFile, mig.detected_project_type);
+
+          if (plugin && typeof plugin.verifyDatabaseReady === 'function') {
+            await this.logStep(migrationId, 'database:restoring', 'Esperando que las tablas se importen completamente en MySQL...', 'RUNNING', 68);
+            await plugin.verifyDatabaseReady(dbName, docRoot);
           }
           await this.logStep(migrationId, 'database:restoring', 'Base de datos MySQL importada y lista.', 'SUCCESS', 70);
         } else {

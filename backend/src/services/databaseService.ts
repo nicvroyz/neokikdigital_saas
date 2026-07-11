@@ -74,8 +74,8 @@ export const databaseService = {
 
       const sqlCommands = `
         CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-        CREATE USER IF NOT EXISTS '${dbUser}'@'%' IDENTIFIED BY '${dbPass}';
-        ALTER USER '${dbUser}'@'%' IDENTIFIED BY '${dbPass}';
+        CREATE USER IF NOT EXISTS '${dbUser}'@'%' IDENTIFIED BY '${dbPass}' REQUIRE NONE;
+        ALTER USER '${dbUser}'@'%' IDENTIFIED BY '${dbPass}' REQUIRE NONE;
         GRANT ALL PRIVILEGES ON \`${dbName}\`.* TO '${dbUser}'@'%';
         FLUSH PRIVILEGES;
       `;

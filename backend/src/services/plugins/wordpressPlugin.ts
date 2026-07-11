@@ -236,6 +236,12 @@ export const wordpressPlugin: FrameworkPlugin = {
       content = content.replace(/define\s*\(\s*['"]MYSQL_SSL_KEY['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_SSL_KEY', '')");
       content = content.replace(/define\s*\(\s*['"]MYSQL_SSL_CERT['"]\s*,\s*[\s\S]*?\)/gi, "define('MYSQL_SSL_CERT', '')");
 
+      // Replace any global references to SSL constants or variable flags
+      content = content.replace(/\bMYSQLI_CLIENT_SSL\b/gi, "0");
+      content = content.replace(/\bMYSQL_CLIENT_SSL\b/gi, "0");
+      content = content.replace(/\$([\w_]*ssl[\w_]*)\s*=\s*true/gi, "$$$1 = false");
+      content = content.replace(/\$([\w_]*ssl[\w_]*)\s*=\s*['"]?(yes|on|1)['"]?/gi, "$$$1 = false");
+
       // Log modified configuration lines
       log(`--- DIAGNÓSTICO WP-CONFIG MODIFICADO ---`);
       const modifiedLines = content.split('\n');

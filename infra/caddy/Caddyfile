@@ -40,3 +40,5 @@ papelesconcepcion.cl {
 www.papelesconcepcion.cl {
         redir https://papelesconcepcion.cl{uri}
 }
+
+import /etc/caddy/sites/*.caddy

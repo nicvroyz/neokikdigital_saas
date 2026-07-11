@@ -27,7 +27,7 @@ export const config = {
     from: process.env.SMTP_FROM || '"Neokik Digital Support" <support@neokikdigital.com>',
   },
   caddy: {
-    configDir: process.env.CADDY_CONFIG_DIR || '/etc/caddy/conf.d',
+    configDir: process.env.CADDY_CONFIG_DIR || '/etc/caddy/sites',
     baseDocRoot: process.env.CLIENT_SITES_PATH || '/srv/neokik/sites',
     dryRun: process.env.MIGRATION_DRY_RUN !== 'false',
   },

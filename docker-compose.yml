@@ -62,6 +62,7 @@ services:
       - /:/host/root:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - /srv/neokik:/srv/neokik
+      - ./infra/caddy/sites:/etc/caddy/sites
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,6 +85,7 @@ services:
       - "443:443"
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile
+      - ./infra/caddy/sites:/etc/caddy/sites
       - caddy_data:/data
       - caddy_config:/config
       - /srv/neokik/sites:/srv/neokik/sites:ro

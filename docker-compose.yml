@@ -114,8 +114,8 @@ services:
       - /srv/neokik/sites:/srv
       - filebrowser_data:/config
 
-  networks:
-    - default
+    networks:
+      - default
 
 volumes:
   postgres_data:

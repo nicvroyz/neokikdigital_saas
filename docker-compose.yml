@@ -108,7 +108,7 @@ services:
       - --username
       - admin
       - --password
-      - TU_PASSWORD_HASH
+      - $2a$10$IL5fXDYSeO5XrAoW5TQ32up6vuiS6eDse00xSBF/Z7VtbmLWwY.5K
 
     volumes:
       - /srv/neokik/sites:/srv

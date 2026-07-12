@@ -98,18 +98,24 @@ services:
     container_name: neokik-filebrowser
     restart: unless-stopped
 
-    volumes:
-      - /srv/neokik/sites:/srv
-      - filebrowser_data:/config
-
     command:
       - --root
       - /srv
       - --database
       - /config/filebrowser.db
+      - --address
+      - 0.0.0.0
+      - --username
+      - admin
+      - --password
+      - TU_PASSWORD_HASH
 
-    networks:
-      - default
+    volumes:
+      - /srv/neokik/sites:/srv
+      - filebrowser_data:/config
+
+  networks:
+    - default
 
 volumes:
   postgres_data:

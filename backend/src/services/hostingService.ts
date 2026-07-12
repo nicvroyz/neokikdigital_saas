@@ -25,7 +25,9 @@ ${domain}, www.${domain} {
 # Auto-generated Caddy Config for ${domain} [ACTIVE]
 ${domain}, www.${domain} {
     root * ${docRoot}
-    php_fastcgi ${containerName}:9000
+    php_fastcgi ${containerName}:9000 {
+        root /var/www/html
+    }
     file_server
     encode gzip
     log {

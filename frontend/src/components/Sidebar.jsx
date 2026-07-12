@@ -1,14 +1,15 @@
 import React from 'react';
-import { LayoutDashboard, Users, Server, Settings, LogOut, Zap, Briefcase, Send, HardDrive } from 'lucide-react';
+import { LayoutDashboard, Users, Server, Settings, LogOut, Zap, Briefcase, Send, HardDrive, Folder } from 'lucide-react';
 
 export default function Sidebar({ activeTab, setActiveTab, onLogout, onTriggerAudit, clientsCount }) {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'clients', label: 'Clientes', icon: Users, badge: clientsCount !== undefined ? String(clientsCount) : '0' },
     { id: 'operations', label: 'Workload', icon: Briefcase },
-    { id: 'communications', label: 'Comunicaciones', icon: Send, badge: 'NUEVO' },
+    { id: 'communications', label: 'Comunicaciones', icon: Send },
     { id: 'hosting', label: 'Servidor', icon: Server },
     { id: 'infrastructure', label: 'Infraestructura', icon: HardDrive },
+    { id: 'files-admin', label: 'Administrar Archivos', icon: Folder, externalUrl: 'https://files.jacvroyz.cl' },
     { id: 'settings', label: 'Configuración', icon: Settings },
   ];
 
@@ -24,8 +25,8 @@ export default function Sidebar({ activeTab, setActiveTab, onLogout, onTriggerAu
           />
         </div>
         <div className="brand-text-block">
-          <div className="brand-name-title">Neokik</div>
-          <div className="brand-name-subtitle">AGENCIA DIGITAL</div>
+          <div className="brand-name-title">NEOKIK</div>
+          <div className="brand-name-subtitle">DIGITAL</div>
         </div>
       </div>
 
@@ -53,8 +54,17 @@ export default function Sidebar({ activeTab, setActiveTab, onLogout, onTriggerAu
           return (
             <button
               key={item.id}
-              className={`nav-link ${activeTab === item.id ? 'active' : ''}`}
-              onClick={() => setActiveTab(item.id)}
+              className={`nav-link ${activeTab === item.id && !item.externalUrl ? 'active' : ''}`}
+              onClick={() => {
+                if (item.externalUrl) {
+                  const newWindow = window.open(item.externalUrl, '_blank');
+                  if (!newWindow) {
+                    window.location.href = item.externalUrl;
+                  }
+                  return;
+                }
+                setActiveTab(item.id);
+              }}
             >
               <div className="nav-link-content">
                 <Icon size={19} />

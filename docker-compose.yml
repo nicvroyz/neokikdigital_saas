@@ -100,7 +100,13 @@ services:
 
     volumes:
       - /srv/neokik/sites:/srv
-      - filebrowser_data:/database
+      - filebrowser_data:/config
+
+    command:
+      - --root
+      - /srv
+      - --database
+      - /config/filebrowser.db
 
     networks:
       - default

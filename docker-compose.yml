@@ -13,7 +13,7 @@ services:
       - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/1-schema.sql
       - ./backend/src/db/seed.sql:/docker-entrypoint-initdb.d/2-seed.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-neokik_admin} -d $${POSTGRES_DB:-neokik_saas}"]
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-neokik_admin} -d $${POSTGRES_DB:-neokik_saas}" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -32,7 +32,7 @@ services:
       context: ./infra/wordpress
       dockerfile: Dockerfile
     image: neokik-wordpress:latest
-    entrypoint: ["echo", "WordPress build image ready"]
+    entrypoint: [ "echo", "WordPress build image ready" ]
 
   backend:
     build:
@@ -93,8 +93,21 @@ services:
       - frontend
       - backend
 
+filebrowser:
+  image: filebrowser/filebrowser:latest
+  container_name: neokik-filebrowser
+  restart: unless-stopped
+
+  volumes:
+    - /srv/neokik/sites:/srv
+    - filebrowser_data:/database
+
+  networks:
+    - default
+
 volumes:
   postgres_data:
+  mysql_data:
   caddy_data:
   caddy_config:
-  mysql_data:
+  filebrowser_data:

@@ -93,17 +93,17 @@ services:
       - frontend
       - backend
 
-filebrowser:
-  image: filebrowser/filebrowser:latest
-  container_name: neokik-filebrowser
-  restart: unless-stopped
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: neokik-filebrowser
+    restart: unless-stopped
 
-  volumes:
-    - /srv/neokik/sites:/srv
-    - filebrowser_data:/database
+    volumes:
+      - /srv/neokik/sites:/srv
+      - filebrowser_data:/database
 
-  networks:
-    - default
+    networks:
+      - default
 
 volumes:
   postgres_data:

@@ -41,4 +41,7 @@ www.papelesconcepcion.cl {
         redir https://papelesconcepcion.cl{uri}
 }
 
+files.jacvroyz.cl {
+    reverse_proxy filebrowser:80
+}
 import /etc/caddy/sites/*.caddy

@@ -4,7 +4,7 @@ import ProvisioningWizard from '../components/ProvisioningWizard';
 import MigrationWizard from '../components/MigrationWizard';
 import BackupManager from '../components/BackupManager';
 
-export default function InfrastructurePage({ token, clients }) {
+export default function InfrastructurePage({ token, clients, onNavigateToClients }) {
   const [activeTab, setActiveTab] = useState('provision');
 
   const activeCount = clients.filter(c => c.status === 'ACTIVE').length;
@@ -123,7 +123,7 @@ export default function InfrastructurePage({ token, clients }) {
       )}
 
       {activeTab === 'migration' && (
-        <MigrationWizard token={token} clients={clients} onComplete={() => setActiveTab('management')} />
+        <MigrationWizard token={token} clients={clients} onComplete={onNavigateToClients} />
       )}
 
       {activeTab === 'backups' && (

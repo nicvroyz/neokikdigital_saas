@@ -88,8 +88,15 @@ export const clientService = {
     const fields: string[] = [];
     const params: any[] = [id];
 
+    // id/created_at/updated_at are never client-editable; updated_at is always
+    // set to CURRENT_TIMESTAMP below, so letting it through here as well would
+    // assign it twice and Postgres rejects that outright ("multiple
+    // assignments to same column"). Frontend sends the full client record back
+    // (including these) when editing, so this exclusion has to happen here.
+    const nonEditableFields = new Set(['id', 'created_at', 'updated_at']);
+
     Object.keys(data).forEach((key) => {
-      if (key !== 'id' && data[key as keyof ClientData] !== undefined) {
+      if (!nonEditableFields.has(key) && data[key as keyof ClientData] !== undefined) {
         params.push(data[key as keyof ClientData]);
         fields.push(`${key} = $${params.length}`);
       }

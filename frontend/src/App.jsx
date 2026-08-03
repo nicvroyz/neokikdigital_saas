@@ -247,7 +247,13 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'infrastructure' && <InfrastructurePage token={token} clients={clients} />}
+        {activeTab === 'infrastructure' && (
+          <InfrastructurePage
+            token={token}
+            clients={clients}
+            onNavigateToClients={() => setActiveTab('clients')}
+          />
+        )}
 
         {activeTab === 'settings' && <SettingsPage />}
       </main>

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Server, HardDrive, ShieldCheck, Terminal, RefreshCw, Code, CheckCircle, Zap } from 'lucide-react';
+import { Server, HardDrive, ShieldCheck, Terminal, RefreshCw, Code, CheckCircle, Zap, Mail } from 'lucide-react';
 
 export default function HostingPage({ clients, onSyncCaddy, token }) {
   const [selectedDomainForConfig, setSelectedDomainForConfig] = useState(null);
   const [terminalOutput, setTerminalOutput] = useState('');
   const [isRunningCommand, setIsRunningCommand] = useState(false);
   const [serverStatus, setServerStatus] = useState(null);
+  const [mailcowStatus, setMailcowStatus] = useState(null);
 
   useEffect(() => {
     if (!token) return;
@@ -21,7 +22,20 @@ export default function HostingPage({ clients, onSyncCaddy, token }) {
         console.error('Error fetching server status:', err);
       }
     };
+    const fetchMailcowStatus = async () => {
+      try {
+        const res = await fetch('/api/infrastructure/mailcow/status', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          setMailcowStatus(await res.json());
+        }
+      } catch (err) {
+        console.error('Error fetching Mailcow status:', err);
+      }
+    };
     fetchStatus();
+    fetchMailcowStatus();
   }, [token]);
 
   const activeCount = clients.filter(c => c.status === 'ACTIVE').length;
@@ -136,6 +150,19 @@ ${client.domain}, www.${client.domain} {
           </div>
           <div style={{ fontSize: '0.78rem', color: '#059669', fontWeight: '700', marginTop: '0.2rem' }}>
             {serverStatus ? `${serverStatus.disk.usage_percent}% Uso de Disco` : 'Cargando...'}
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '1.25rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <span style={{ fontSize: '0.825rem', fontWeight: '700', color: 'var(--text-sub)' }}>Salud de Mailcow</span>
+            <Mail size={18} color="#0891b2" />
+          </div>
+          <div style={{ fontSize: '1.2rem', fontWeight: '800', fontFamily: 'Outfit, sans-serif' }}>
+            {mailcowStatus ? `${mailcowStatus.domains} dominios` : 'Cargando...'}
+          </div>
+          <div style={{ fontSize: '0.78rem', color: mailcowStatus?.connected ? '#059669' : '#be123c', fontWeight: '700', marginTop: '0.2rem' }}>
+            {mailcowStatus ? (mailcowStatus.connected ? `● Conectado (${mailcowStatus.mailboxes} buzones)` : '● Sin conexión') : 'Cargando...'}
           </div>
         </div>
       </div>

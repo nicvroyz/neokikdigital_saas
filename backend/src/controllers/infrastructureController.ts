@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import { AuthRequest } from '../middleware/auth';
 import { query } from '../config/db';
 import { queueService } from '../services/queueService';
 import { migrationService } from '../services/migrationService';
@@ -13,47 +12,6 @@ import { mailcowService } from '../services/mailcowService';
 import http from 'http';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
-
-const DOMAIN_REGEX = /^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})+$/;
-
-function bytesToMb(bytes: number | string | undefined | null): number {
-  const n = typeof bytes === 'string' ? parseInt(bytes, 10) : (bytes || 0);
-  if (!n || Number.isNaN(n)) return 0;
-  return Math.round((n / (1024 * 1024)) * 100) / 100;
-}
-
-function isEmailOfDomain(email: string, domain: string): boolean {
-  return email.toLowerCase().endsWith(`@${domain.toLowerCase()}`);
-}
-
-async function insertEmailAuditLog(
-  req: AuthRequest,
-  action: 'email:create' | 'email:update_password' | 'email:update_quota' | 'email:update' | 'email:delete',
-  clientId: string,
-  email: string,
-  metadata: Record<string, any>,
-  status: 'SUCCESS' | 'FAILED'
-) {
-  try {
-    await query(
-      `INSERT INTO audit_logs (user_id, client_id, action, entity, old_value, new_value, metadata, status, ip)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [
-        req.user?.id || null,
-        clientId,
-        action,
-        'mailbox',
-        JSON.stringify({}),
-        JSON.stringify({}),
-        JSON.stringify({ email, ...metadata }),
-        status,
-        req.ip || null,
-      ]
-    );
-  } catch (err) {
-    console.error('[AUDIT LOG ERROR] Failed to write mailbox audit log', err);
-  }
-}
 
 async function checkDockerServiceStatus(containerName: string): Promise<string> {
   const isDryRun = !!config.caddy.dryRun || !fs.existsSync('/var/run/docker.sock');
@@ -514,6 +472,16 @@ export const infrastructureController = {
     }
   },
 
+  async getMailcowStatus(req: Request, res: Response) {
+    try {
+      const status = await mailcowService.getStatus();
+      return res.json(status);
+    } catch (err) {
+      console.error('Error fetching Mailcow status:', err);
+      return res.status(502).json({ connected: false, domains: 0, mailboxes: 0, error: `Error al consultar Mailcow: ${(err as Error).message}` });
+    }
+  },
+
   async getPHPVersions(req: Request, res: Response) {
     try {
       const versions = [
@@ -534,7 +502,10 @@ export const infrastructureController = {
 
   async getAllBackups(req: Request, res: Response) {
     try {
-      const result = await query('SELECT * FROM backups ORDER BY created_at DESC');
+      const { client_id } = req.query;
+      const result = client_id
+        ? await query('SELECT * FROM backups WHERE client_id = $1 ORDER BY created_at DESC', [client_id])
+        : await query('SELECT * FROM backups ORDER BY created_at DESC');
       return res.json(result.rows);
     } catch (err) {
       console.error('Error fetching backups:', err);
@@ -708,151 +679,6 @@ export const infrastructureController = {
     } catch (err) {
       console.error('Error optimizing client database:', err);
       return res.status(500).json({ error: 'Error al optimizar la base de datos del cliente' });
-    }
-  },
-
-  async createEmailAccount(req: AuthRequest, res: Response) {
-    const { id } = req.params;
-    const { local_part, domain, password, quota, name } = req.body;
-    try {
-      if (!local_part || !domain || !password) {
-        return res.status(400).json({ error: 'Campos requeridos: local_part, domain, password' });
-      }
-      if (!DOMAIN_REGEX.test(domain)) {
-        return res.status(400).json({ error: 'Dominio inválido' });
-      }
-
-      const client = await query('SELECT * FROM clients WHERE id = $1', [id]);
-      if (client.rows.length === 0) {
-        return res.status(404).json({ error: 'Cliente no encontrado' });
-      }
-      if (domain.toLowerCase() !== String(client.rows[0].domain).toLowerCase()) {
-        return res.status(403).json({ error: 'El dominio no pertenece a este cliente' });
-      }
-
-      const domainExists = await mailcowService.domainExists(domain);
-      if (!domainExists) {
-        return res.status(400).json({ error: `El dominio ${domain} no está registrado en Mailcow. Debe crearse primero (mailcowService.createDomain) antes de agregar buzones.` });
-      }
-
-      const emailAddress = `${local_part}@${domain}`;
-      const result = await mailcowService.createMailbox({
-        local_part,
-        domain,
-        password,
-        quota: quota || 1024,
-        name,
-      });
-
-      await insertEmailAuditLog(req, 'email:create', id, emailAddress, { quota_mb: quota || 1024 }, 'SUCCESS');
-
-      return res.status(201).json({
-        message: `Cuenta de correo creada: ${emailAddress}`,
-        email: emailAddress,
-        quota_mb: quota || 1024,
-        status: 'ACTIVE',
-        mailcow: result,
-      });
-    } catch (err) {
-      console.error('Error creating email account:', err);
-      await insertEmailAuditLog(req, 'email:create', id, `${local_part}@${domain}`, { error: (err as Error).message }, 'FAILED');
-      return res.status(502).json({ error: `Error al crear la cuenta de correo en Mailcow: ${(err as Error).message}` });
-    }
-  },
-
-  async deleteEmailAccount(req: AuthRequest, res: Response) {
-    const { id, address } = req.params;
-    const email = decodeURIComponent(address);
-    try {
-      const client = await query('SELECT * FROM clients WHERE id = $1', [id]);
-      if (client.rows.length === 0) {
-        return res.status(404).json({ error: 'Cliente no encontrado' });
-      }
-
-      if (!isEmailOfDomain(email, client.rows[0].domain)) {
-        return res.status(403).json({ error: 'La casilla no pertenece a este cliente' });
-      }
-
-      await mailcowService.deleteMailbox(email);
-      await insertEmailAuditLog(req, 'email:delete', id, email, {}, 'SUCCESS');
-      return res.json({ message: `Cuenta de correo eliminada: ${email}` });
-    } catch (err) {
-      console.error('Error deleting email account:', err);
-      await insertEmailAuditLog(req, 'email:delete', id, email, { error: (err as Error).message }, 'FAILED');
-      return res.status(502).json({ error: `Error al eliminar la cuenta de correo en Mailcow: ${(err as Error).message}` });
-    }
-  },
-
-  // Password/quota/active changes are all routed through mailcowService.updateMailbox(),
-  // which maps to Mailcow's single /edit/mailbox endpoint ({ items: [email], attr: {...} }).
-  // There is intentionally no separate changePassword()/changeQuota() service method.
-  async updateEmailAccount(req: AuthRequest, res: Response) {
-    const { id, address } = req.params;
-    const { password, quota, active } = req.body;
-    const email = decodeURIComponent(address);
-    try {
-      const client = await query('SELECT * FROM clients WHERE id = $1', [id]);
-      if (client.rows.length === 0) {
-        return res.status(404).json({ error: 'Cliente no encontrado' });
-      }
-
-      if (!isEmailOfDomain(email, client.rows[0].domain)) {
-        return res.status(403).json({ error: 'La casilla no pertenece a este cliente' });
-      }
-      if (password === undefined && quota === undefined && active === undefined) {
-        return res.status(400).json({ error: 'Debes enviar password, quota o active para actualizar' });
-      }
-      if (password !== undefined && (typeof password !== 'string' || password.length < 8)) {
-        return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
-      }
-
-      const result = await mailcowService.updateMailbox(email, { password, quota, active });
-
-      // Never persist the plaintext password in audit metadata — just record that it changed.
-      const action = password !== undefined ? 'email:update_password' : quota !== undefined ? 'email:update_quota' : 'email:update';
-      const metadata: Record<string, any> = {};
-      if (password !== undefined) metadata.password_changed = true;
-      if (quota !== undefined) metadata.quota_mb = quota;
-      if (active !== undefined) metadata.active = active;
-      await insertEmailAuditLog(req, action, id, email, metadata, 'SUCCESS');
-
-      return res.json({ message: `Cuenta de correo actualizada: ${email}`, mailcow: result });
-    } catch (err) {
-      console.error('Error updating email account:', err);
-      await insertEmailAuditLog(req, 'email:update', id, email, { error: (err as Error).message }, 'FAILED');
-      return res.status(502).json({ error: `Error al actualizar la cuenta de correo en Mailcow: ${(err as Error).message}` });
-    }
-  },
-
-  async getClientEmails(req: Request, res: Response) {
-    try {
-      const { id } = req.params;
-      const client = await query('SELECT * FROM clients WHERE id = $1', [id]);
-      if (client.rows.length === 0) {
-        return res.status(404).json({ error: 'Cliente no encontrado' });
-      }
-
-      const domain = client.rows[0].domain;
-      const mailboxes = await mailcowService.listMailboxes(domain);
-
-      if (!Array.isArray(mailboxes)) {
-        return res.json({ domain, emails: [] });
-      }
-
-      const emails = mailboxes.map((mb: any) => ({
-        address: mb.username,
-        quota_mb: bytesToMb(mb.quota),
-        used_mb: bytesToMb(mb.quota_used),
-        status: Number(mb.active) === 1 ? 'ACTIVE' : 'INACTIVE',
-        messages: mb.messages ?? null,
-        last_imap_login: mb.last_imap_login || null,
-        last_smtp_login: mb.last_smtp_login || null,
-      }));
-
-      return res.json({ domain, emails });
-    } catch (err) {
-      console.error('Error fetching client emails:', err);
-      return res.status(502).json({ error: `Error al obtener las cuentas de correo desde Mailcow: ${(err as Error).message}` });
     }
   },
 

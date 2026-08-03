@@ -1,7 +1,7 @@
 import React from 'react';
-import { ExternalLink, RefreshCw, Edit2, Trash2, Globe } from 'lucide-react';
+import { ExternalLink, RefreshCw, Edit2, Trash2, Globe, Settings } from 'lucide-react';
 
-export default function ClientTable({ clients, onRenew, onEdit, onDelete }) {
+export default function ClientTable({ clients, onRenew, onEdit, onDelete, onManage }) {
   const getStatusBadge = (status) => {
     switch (status) {
       case 'ACTIVE':
@@ -150,6 +150,14 @@ export default function ClientTable({ clients, onRenew, onEdit, onDelete }) {
               </td>
               <td style={{ textAlign: 'right' }}>
                 <div style={{ display: 'flex', gap: '0.45rem', justifyContent: 'flex-end' }}>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ padding: '0.45rem 0.85rem', fontSize: '0.825rem' }}
+                    onClick={() => onManage(client)}
+                    title="Administrar hosting, correos, dominios y alias de este cliente"
+                  >
+                    <Settings size={13} /> Administrar
+                  </button>
                   <button
                     className="btn btn-primary"
                     style={{ padding: '0.45rem 0.85rem', fontSize: '0.825rem' }}

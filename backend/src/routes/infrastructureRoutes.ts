@@ -34,6 +34,7 @@ router.post('/ssl/:domain', infrastructureController.issueSSL);
 // Server Status
 router.get('/server/status', infrastructureController.getServerStatus);
 router.get('/server/php-versions', infrastructureController.getPHPVersions);
+router.get('/mailcow/status', infrastructureController.getMailcowStatus);
 
 // Backups
 router.get('/backups', infrastructureController.getAllBackups);
@@ -47,9 +48,24 @@ router.get('/clients/:id/logs', infrastructureController.getClientLogs);
 router.get('/clients/:id/disk-usage', infrastructureController.getClientDiskUsage);
 router.post('/clients/:id/db/backup', infrastructureController.backupClientDB);
 router.post('/clients/:id/db/optimize', infrastructureController.optimizeClientDB);
-router.get('/clients/:id/emails', infrastructureController.getClientEmails);
-router.post('/clients/:id/email', infrastructureController.createEmailAccount);
-router.patch('/clients/:id/email/:address', infrastructureController.updateEmailAccount);
-router.delete('/clients/:id/email/:address', infrastructureController.deleteEmailAccount);
+// DEPRECATED: email management moved to /api/clients/:id/emails (client-scoped namespace).
+// These 307 redirects exist only to avoid breaking any caller still hitting the old path
+// during the transition — they preserve method and body. Remove once nothing hits them.
+router.get('/clients/:id/emails', (req, res) => {
+  console.warn(`[DEPRECATED ROUTE] GET /api/infrastructure/clients/${req.params.id}/emails -> use /api/clients/:id/emails`);
+  res.redirect(307, `/api/clients/${req.params.id}/emails`);
+});
+router.post('/clients/:id/email', (req, res) => {
+  console.warn(`[DEPRECATED ROUTE] POST /api/infrastructure/clients/${req.params.id}/email -> use /api/clients/:id/emails`);
+  res.redirect(307, `/api/clients/${req.params.id}/emails`);
+});
+router.patch('/clients/:id/email/:address', (req, res) => {
+  console.warn(`[DEPRECATED ROUTE] PATCH /api/infrastructure/clients/${req.params.id}/email/:address -> use /api/clients/:id/emails/:address`);
+  res.redirect(307, `/api/clients/${req.params.id}/emails/${req.params.address}`);
+});
+router.delete('/clients/:id/email/:address', (req, res) => {
+  console.warn(`[DEPRECATED ROUTE] DELETE /api/infrastructure/clients/${req.params.id}/email/:address -> use /api/clients/:id/emails/:address`);
+  res.redirect(307, `/api/clients/${req.params.id}/emails/${req.params.address}`);
+});
 
 export default router;

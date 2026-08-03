@@ -190,6 +190,7 @@ const mockMailboxes: Record<string, any[]> = {
 };
 
 const mockDomains = ['jacvroyz.cl', 'ejemplo.cl'];
+const mockAliases: Record<string, any[]> = {};
 
 // ─── Service ─────────────────────────────────────────────────────────────────
 
@@ -359,6 +360,9 @@ export const mailcowService = {
 
     if (isDryRun()) {
       log(`[DRY RUN] Alias creado: ${address} → ${goto}`);
+      const domain = address.split('@')[1];
+      if (!mockAliases[domain]) mockAliases[domain] = [];
+      mockAliases[domain].push({ address, goto, active: 1 });
       return { type: 'success', msg: `Alias ${address} → ${goto} creado (simulado)` };
     }
 
@@ -374,10 +378,27 @@ export const mailcowService = {
 
     if (isDryRun()) {
       log(`[DRY RUN] Alias eliminado: ${address}`);
+      const domain = address.split('@')[1];
+      if (mockAliases[domain]) {
+        mockAliases[domain] = mockAliases[domain].filter(a => a.address !== address);
+      }
       return { type: 'success', msg: `Alias ${address} eliminado (simulado)` };
     }
 
     return apiRequest('POST', '/delete/alias', [address]);
+  },
+
+  async listAliases(domain: string): Promise<any[]> {
+    log(`Listando alias de: ${domain}`);
+
+    if (isDryRun()) {
+      return mockAliases[domain] || [];
+    }
+
+    // Mailcow's /get/alias/all is not domain-scoped, so we filter client-side.
+    const allAliases = await apiRequest('GET', '/get/alias/all');
+    if (!Array.isArray(allAliases)) return [];
+    return allAliases.filter((a: any) => String(a.address || '').toLowerCase().endsWith(`@${domain.toLowerCase()}`));
   },
 
   async createForwarder(address: string, goto: string): Promise<any> {

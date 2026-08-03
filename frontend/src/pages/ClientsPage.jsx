@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Search, Plus, Filter, RefreshCw, Edit2, Trash2, ExternalLink, ShieldAlert, CheckCircle, Clock, AlertTriangle, Copy, Check } from 'lucide-react';
 import ClientTable from '../components/ClientTable';
 
-export default function ClientsPage({ clients, activeFilter, setActiveFilter, onAddClient, onEdit, onRenew, onDelete }) {
+export default function ClientsPage({ clients, activeFilter, setActiveFilter, onAddClient, onEdit, onRenew, onDelete, onManage }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedDomain, setCopiedDomain] = useState(null);
 
@@ -119,6 +119,7 @@ export default function ClientsPage({ clients, activeFilter, setActiveFilter, on
           onEdit={onEdit}
           onRenew={onRenew}
           onDelete={onDelete}
+          onManage={onManage}
         />
       )}
     </div>

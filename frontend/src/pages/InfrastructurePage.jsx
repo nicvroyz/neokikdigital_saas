@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { HardDrive, Rocket, ArrowRightLeft, Server, Archive } from 'lucide-react';
+import { HardDrive, Rocket, ArrowRightLeft, Archive } from 'lucide-react';
 import ProvisioningWizard from '../components/ProvisioningWizard';
 import MigrationWizard from '../components/MigrationWizard';
-import InfraClientPanel from '../components/InfraClientPanel';
 import BackupManager from '../components/BackupManager';
 
 export default function InfrastructurePage({ token, clients }) {
@@ -102,7 +101,6 @@ export default function InfrastructurePage({ token, clients }) {
         {[
           { id: 'provision', label: 'Nuevo Cliente', icon: Rocket },
           { id: 'migration', label: 'Asistente de Migración', icon: ArrowRightLeft },
-          { id: 'management', label: 'Panel de Infraestructura', icon: Server },
           { id: 'backups', label: 'Copias de Seguridad', icon: Archive },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -126,10 +124,6 @@ export default function InfrastructurePage({ token, clients }) {
 
       {activeTab === 'migration' && (
         <MigrationWizard token={token} clients={clients} onComplete={() => setActiveTab('management')} />
-      )}
-
-      {activeTab === 'management' && (
-        <InfraClientPanel token={token} clients={clients} />
       )}
 
       {activeTab === 'backups' && (

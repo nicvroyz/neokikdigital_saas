@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import DashboardPage from './pages/DashboardPage';
 import ClientsPage from './pages/ClientsPage';
+import ClientDetailPage from './pages/ClientDetailPage';
 import OperationsPage from './pages/OperationsPage';
 import CommunicationsPage from './pages/CommunicationsPage';
 import HostingPage from './pages/HostingPage';
@@ -15,6 +16,7 @@ export default function App() {
   const [token, setToken] = useState(localStorage.getItem('neokik_token'));
   const [activeTab, setActiveTab] = useState('dashboard');
   const [activeFilter, setActiveFilter] = useState('ALL');
+  const [managedClientId, setManagedClientId] = useState(null);
 
   const [summary, setSummary] = useState(null);
   const [clients, setClients] = useState([]);
@@ -203,6 +205,23 @@ export default function App() {
               setIsRenewModalOpen(true);
             }}
             onDelete={handleDeleteClient}
+            onManage={(client) => {
+              setManagedClientId(client.id);
+              setActiveTab('client-detail');
+            }}
+          />
+        )}
+
+        {activeTab === 'client-detail' && (
+          <ClientDetailPage
+            token={token}
+            clients={clients}
+            clientId={managedClientId}
+            onBack={() => setActiveTab('clients')}
+            onEditClient={(client) => {
+              setSelectedClientForEdit(client);
+              setIsClientModalOpen(true);
+            }}
           />
         )}
 

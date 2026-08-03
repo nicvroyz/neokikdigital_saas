@@ -74,7 +74,12 @@ export const clientResourcesController = {
         return res.json({ domain, emails: [] });
       }
 
-      const emails = mailboxes.map((mb: any) => ({
+      // Defensive: only keep mailboxes whose address actually belongs to this
+      // client's domain, in case the Mailcow endpoint ever returns more than
+      // the requested domain (same precaution already applied to listAliases).
+      const domainMailboxes = mailboxes.filter((mb: any) => isEmailOfDomain(String(mb.username || ''), domain));
+
+      const emails = domainMailboxes.map((mb: any) => ({
         address: mb.username,
         quota_mb: bytesToMb(mb.quota),
         used_mb: bytesToMb(mb.quota_used),

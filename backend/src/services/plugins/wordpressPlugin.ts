@@ -57,10 +57,15 @@ async function getOrDetectTablePrefix(docRoot: string, dbName: string): Promise<
   return 'wp_';
 }
 
+// Applied only to the individual PHP/WP-CLI calls below (never the container's
+// own php.ini/global memory_limit). Configurable via MIGRATION_PHP_MEMORY_LIMIT,
+// defaults to 1024M — see config.migration.phpMemoryLimit.
+const MIGRATION_PHP_MEMORY_LIMIT = config.migration.phpMemoryLimit;
+
 async function ensureWordpressDatabaseConnection(containerName: string): Promise<void> {
   log(`Verificando conectividad de WordPress con su base de datos usando PHP/MySQLi...`);
-  const maxRetries = 15; // 30 seconds max
-  const intervalMs = 2000;
+  const maxRetries = 30; // 90 seconds max (was 15/30s) - gives MySQL more time under load
+  const intervalMs = 3000;
 
   const phpDbCheckCmd = `
     $h = getenv('WORDPRESS_DB_HOST') ?: 'neokik-mysql';
@@ -80,7 +85,11 @@ async function ensureWordpressDatabaseConnection(containerName: string): Promise
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      execFileSync('docker', ['exec', containerName, 'php', '-r', phpDbCheckCmd], { timeout: 5000, stdio: 'pipe' });
+      execFileSync(
+        'docker',
+        ['exec', containerName, 'php', '-d', `memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}`, '-r', phpDbCheckCmd],
+        { timeout: 8000, stdio: 'pipe' }
+      );
       log(`Conexión con la base de datos confirmada mediante PHP/MySQLi en el intento ${attempt}.`);
       return;
     } catch (err: any) {
@@ -411,13 +420,13 @@ export const wordpressPlugin: FrameworkPlugin = {
     try {
       await ensureWordpressDatabaseConnection(containerName);
       
-      const stdout = execSync(`docker exec ${containerName} wp option get siteurl --allow-root`, { timeout: 10000 }).toString().trim();
+      const stdout = execSync(`docker exec -e WP_CLI_PHP_ARGS="-d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}" ${containerName} wp option get siteurl --allow-root`, { timeout: 10000 }).toString().trim();
       if (stdout && stdout.startsWith('http')) {
         log(`Dominio original detectado vía WP-CLI: ${stdout}`);
         return stdout;
       }
     } catch (wpCliErr: any) {
-      const cmd = `docker exec ${containerName} wp option get siteurl --allow-root`;
+      const cmd = `docker exec -e WP_CLI_PHP_ARGS="-d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}" ${containerName} wp option get siteurl --allow-root`;
       const stdout = wpCliErr.stdout ? wpCliErr.stdout.toString().trim() : '';
       const stderr = wpCliErr.stderr ? wpCliErr.stderr.toString().trim() : (wpCliErr.message || '');
       const status = wpCliErr.status !== undefined ? wpCliErr.status : -1;
@@ -471,7 +480,7 @@ export const wordpressPlugin: FrameworkPlugin = {
 
       // 2. Validar PHP responde
       try {
-        const phpInfo = execSync(`docker exec ${containerName} php -v`, { stdio: 'pipe' }).toString().trim();
+        const phpInfo = execSync(`docker exec ${containerName} php -d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT} -v`, { stdio: 'pipe' }).toString().trim();
         log(`HEALTH CHECK: PHP funcionando en contenedor (${phpInfo.split('\n')[0]})`);
       } catch (err: any) {
         const stdout = err.stdout ? err.stdout.toString().trim() : '';
@@ -481,13 +490,33 @@ export const wordpressPlugin: FrameworkPlugin = {
       }
 
       // 3. Validar WordPress conecta a DB (wp option get siteurl)
-      try {
-        const siteUrl = execSync(`docker exec ${containerName} wp option get siteurl --allow-root`, { stdio: 'pipe' }).toString().trim();
-        log(`HEALTH CHECK: Conexión a Base de Datos validada. siteurl resuelve a: "${siteUrl}"`);
-      } catch (err: any) {
-        const stdout = err.stdout ? err.stdout.toString().trim() : '';
-        const stderr = err.stderr ? err.stderr.toString().trim() : (err.message || '');
-        log(`HEALTH CHECK FAILED: WordPress no puede conectarse a la Base de Datos. Status: ${err.status}, Stdout: "${stdout}", Stderr: "${stderr}"`);
+      // Retried up to 3 times: a transient "Allowed memory size exhausted" or a
+      // momentary DB hiccup here should not fail the whole migration outright.
+      let dbCheckPassed = false;
+      let lastDbCheckErr: any = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const siteUrl = execSync(
+            `docker exec -e WP_CLI_PHP_ARGS="-d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}" ${containerName} wp option get siteurl --allow-root`,
+            { stdio: 'pipe' }
+          ).toString().trim();
+          log(`HEALTH CHECK: Conexión a Base de Datos validada. siteurl resuelve a: "${siteUrl}"`);
+          dbCheckPassed = true;
+          break;
+        } catch (err: any) {
+          lastDbCheckErr = err;
+          const stdout = err.stdout ? err.stdout.toString().trim() : '';
+          const stderr = err.stderr ? err.stderr.toString().trim() : (err.message || '');
+          log(`HEALTH CHECK: intento ${attempt}/3 fallido al conectar a la Base de Datos. Status: ${err.status}, Stdout: "${stdout}", Stderr: "${stderr}"`);
+          if (attempt < 3) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          }
+        }
+      }
+      if (!dbCheckPassed) {
+        const stdout = lastDbCheckErr?.stdout ? lastDbCheckErr.stdout.toString().trim() : '';
+        const stderr = lastDbCheckErr?.stderr ? lastDbCheckErr.stderr.toString().trim() : (lastDbCheckErr?.message || '');
+        log(`HEALTH CHECK FAILED: WordPress no puede conectarse a la Base de Datos tras 3 intentos. Stdout: "${stdout}", Stderr: "${stderr}"`);
         return false;
       }
 

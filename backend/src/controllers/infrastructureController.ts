@@ -810,9 +810,17 @@ export const infrastructureController = {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // avoid reverse-proxy buffering of the stream
     res.flushHeaders();
+    req.socket.setNoDelay(true); // disable Nagle's algorithm so events flush immediately
 
     console.log(`[SSE] Client connected to stream for migration: ${id}`);
+
+    // Heartbeat keeps the connection alive and flushing during long silent
+    // phases (e.g. large file copies), independent of real step events.
+    const heartbeat = setInterval(() => {
+      res.write(': heartbeat\n\n');
+    }, 15000);
 
     // Send connection established event
     res.write(`data: ${JSON.stringify({ type: 'connected', migrationId: id })}\n\n`);
@@ -868,6 +876,7 @@ export const infrastructureController = {
 
     req.on('close', () => {
       console.log(`[SSE] Client disconnected from stream for migration: ${id}`);
+      clearInterval(heartbeat);
       eventBus.off('migration:started', onStarted);
       eventBus.off('migration:step', onStep);
       eventBus.off('migration:completed', onCompleted);

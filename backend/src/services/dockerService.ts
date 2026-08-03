@@ -239,9 +239,9 @@ export const dockerService = {
     }
   },
 
-  async waitForContainerReady(containerName: string, isWordpress = true, timeoutMs = 60000): Promise<void> {
+  async waitForContainerReady(containerName: string, isWordpress = true, timeoutMs = 120000): Promise<void> {
     log(`Esperando a que el contenedor ${containerName} esté listo y operativo (WordPress: ${isWordpress}, timeout: ${timeoutMs}ms)...`);
-    
+
     if (isDryRun()) return;
 
     validateShellSafe(containerName);
@@ -249,6 +249,10 @@ export const dockerService = {
     const startTime = Date.now();
     const intervalMs = 3000;
     let isContainerRunning = false;
+    // Applied only to the individual PHP checks below (never the container's
+    // own php.ini/global memory_limit). Configurable via MIGRATION_PHP_MEMORY_LIMIT,
+    // defaults to 1024M — see config.migration.phpMemoryLimit.
+    const MIGRATION_PHP_MEMORY_LIMIT = config.migration.phpMemoryLimit;
 
     const phpDbCheckCmd = `
       $h = getenv('WORDPRESS_DB_HOST') ?: 'neokik-mysql';
@@ -274,7 +278,7 @@ export const dockerService = {
 
           // 1. Verify PHP execution works first
           try {
-            const phpInfo = execFileSync('docker', ['exec', containerName, 'php', '-v'], { timeout: 3000, stdio: 'pipe' }).toString().trim();
+            const phpInfo = execFileSync('docker', ['exec', containerName, 'php', '-d', `memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}`, '-v'], { timeout: 5000, stdio: 'pipe' }).toString().trim();
             if (!phpInfo.includes('PHP')) {
               throw new Error('PHP no está operativo en el contenedor.');
             }
@@ -287,7 +291,7 @@ export const dockerService = {
           // 2. For WordPress containers, verify MySQL connection works via PHP/MySQLi
           if (isWordpress) {
             try {
-              execFileSync('docker', ['exec', containerName, 'php', '-r', phpDbCheckCmd], { timeout: 5000, stdio: 'pipe' });
+              execFileSync('docker', ['exec', containerName, 'php', '-d', `memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}`, '-r', phpDbCheckCmd], { timeout: 8000, stdio: 'pipe' });
               log(`Contenedor WordPress ${containerName} está completamente operativo y con conexión a base de datos confirmada.`);
               return;
             } catch (dbErr) {

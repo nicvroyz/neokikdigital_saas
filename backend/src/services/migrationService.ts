@@ -30,6 +30,25 @@ function log(msg: string) {
   console.log(`[${new Date().toISOString()}] [MIGRATION SERVICE]${prefix} ${msg}`);
 }
 
+// Applied only to the individual wp-cli calls below (never the container's own
+// php.ini/global memory_limit). Configurable via MIGRATION_PHP_MEMORY_LIMIT,
+// defaults to 1024M — see config.migration.phpMemoryLimit. Retried once so a
+// transient failure (memory or a momentary DB hiccup) doesn't skip the step
+// on the first try.
+const MIGRATION_PHP_MEMORY_LIMIT = config.migration.phpMemoryLimit;
+
+function execWpCliWithRetry(containerName: string, args: string[], timeoutMs: number, label: string): void {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      execFileSync('docker', ['exec', '-e', `WP_CLI_PHP_ARGS=-d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}`, containerName, 'wp', ...args], { timeout: timeoutMs });
+      return;
+    } catch (err) {
+      log(`Intento ${attempt}/2 fallido en ${label}: ${(err as Error).message}`);
+      if (attempt === 2) throw err;
+    }
+  }
+}
+
 export const migrationService = {
   async getMigration(id: string) {
     const res = await query('SELECT * FROM migrations WHERE id = $1', [id]);
@@ -284,9 +303,9 @@ export const migrationService = {
             
             if (!isDryRun) {
               try {
-                execFileSync('docker', ['exec', containerName, 'wp', 'search-replace', cleanOriginal, cleanTarget, '--all-tables', '--allow-root'], { timeout: 120000 });
-                execFileSync('docker', ['exec', containerName, 'wp', 'search-replace', `http://${cleanOriginal}`, `https://${cleanTarget}`, '--all-tables', '--allow-root'], { timeout: 120000 });
-                execFileSync('docker', ['exec', containerName, 'wp', 'search-replace', `https://${cleanOriginal}`, `https://${cleanTarget}`, '--all-tables', '--allow-root'], { timeout: 120000 });
+                execWpCliWithRetry(containerName, ['search-replace', cleanOriginal, cleanTarget, '--all-tables', '--allow-root'], 120000, 'wp search-replace (dominio)');
+                execWpCliWithRetry(containerName, ['search-replace', `http://${cleanOriginal}`, `https://${cleanTarget}`, '--all-tables', '--allow-root'], 120000, 'wp search-replace (http->https)');
+                execWpCliWithRetry(containerName, ['search-replace', `https://${cleanOriginal}`, `https://${cleanTarget}`, '--all-tables', '--allow-root'], 120000, 'wp search-replace (https)');
               } catch (srErr) {
                 log(`Advertencia en wp search-replace: ${(srErr as Error).message}`);
               }
@@ -299,7 +318,7 @@ export const migrationService = {
 
           if (!isDryRun) {
             try {
-              execFileSync('docker', ['exec', containerName, 'wp', 'cache', 'flush', '--allow-root'], { timeout: 30000 });
+              execWpCliWithRetry(containerName, ['cache', 'flush', '--allow-root'], 30000, 'wp cache flush');
             } catch (cfErr) {
               log(`Advertencia en wp cache flush: ${(cfErr as Error).message}`);
             }

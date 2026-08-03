@@ -33,6 +33,10 @@ export const config = {
   },
   migration: {
     dryRun: process.env.MIGRATION_DRY_RUN !== 'false',
+    // memory_limit applied only to the individual PHP/WP-CLI calls the migration
+    // engine runs (connectivity checks, health checks, search-replace, cache
+    // flush) — never the container's own php.ini/global memory_limit.
+    phpMemoryLimit: process.env.MIGRATION_PHP_MEMORY_LIMIT || '1024M',
   },
   mailcow: {
     apiUrl: process.env.MAILCOW_API_URL || 'http://localhost:8080',

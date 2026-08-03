@@ -2,7 +2,13 @@ import { config } from '../config/env';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// Mock data below exists ONLY for local development convenience. In production
+// (NODE_ENV=production) it must never be reachable — a Mailcow failure there
+// has to surface as a real error, never as fabricated mailbox data.
 function isDryRun(): boolean {
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
   return !!config.migration.dryRun;
 }
 
@@ -208,6 +214,18 @@ export const mailcowService = {
       restart_sogo: 1,
       active: 1,
     });
+  },
+
+  async domainExists(domain: string): Promise<boolean> {
+    log(`Verificando existencia de dominio: ${domain}`);
+
+    if (isDryRun()) {
+      return mockDomains.includes(domain);
+    }
+
+    const domainsData = await apiRequest('GET', '/get/domain/all');
+    if (!Array.isArray(domainsData)) return false;
+    return domainsData.some((d: any) => String(d.domain_name || d.domain || '').toLowerCase() === domain.toLowerCase());
   },
 
   async deleteDomain(domain: string): Promise<any> {

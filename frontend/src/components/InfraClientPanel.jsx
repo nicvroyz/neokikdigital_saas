@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Server, HardDrive, Database, Mail, Globe, Terminal, RefreshCw, 
-  Power, ShieldCheck, ShieldAlert, Play, Trash2, Key, ToggleLeft, 
-  ToggleRight, Settings, ListFilter, Plus, Info, CheckCircle2, ArrowRight
+import {
+  Server, HardDrive, Database, Mail, Globe, Terminal, RefreshCw,
+  Power, ShieldCheck, ShieldAlert, Play, Trash2, Key, ToggleLeft,
+  ToggleRight, Settings, ListFilter, Plus, Info, CheckCircle2, ArrowRight,
+  ExternalLink, XCircle, Gauge
 } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 
@@ -21,11 +22,16 @@ export default function InfraClientPanel({ token, clients }) {
   // Mail form states
   const [newMail, setNewMail] = useState({ local_part: '', password: '', quota: 1024 });
   const [showMailForm, setShowMailForm] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null);
+  const [editingMailbox, setEditingMailbox] = useState(null); // { address, mode: 'password' | 'quota' }
+  const [editPassword, setEditPassword] = useState('');
+  const [editQuota, setEditQuota] = useState(1024);
 
   const clientOptions = clients.map(c => ({ value: c.id, label: `${c.name} (${c.domain})` }));
   const currentClientObj = clients.find(c => c.id === selectedClient) || clients[0];
 
   useEffect(() => {
+    setEditingMailbox(null);
     if (selectedClient) {
       fetchClientData();
     }
@@ -161,14 +167,17 @@ export default function InfraClientPanel({ token, clients }) {
           domain: currentClientObj?.domain
         })
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setNewMail({ local_part: '', password: '', quota: 1024 });
         setShowMailForm(false);
         fetchClientData();
         showFeedback('Cuenta de correo creada en Mailcow.');
+      } else {
+        showError(data.error || 'No se pudo crear la cuenta de correo.');
       }
-    } catch {
-      showFeedback('Cuenta de correo creada (Simulado).');
+    } catch (err) {
+      showError('Error de red al crear la cuenta de correo.');
     }
   };
 
@@ -179,18 +188,78 @@ export default function InfraClientPanel({ token, clients }) {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         fetchClientData();
         showFeedback('Buzón de correo eliminado.');
+      } else {
+        showError(data.error || 'No se pudo eliminar el buzón.');
+      }
+    } catch (err) {
+      showError('Error de red al eliminar el buzón.');
+    }
+  };
+
+  const handleUpdateEmailPassword = async (e) => {
+    e.preventDefault();
+    if (!editingMailbox || editPassword.length < 8) return;
+    try {
+      const res = await fetch(`/api/infrastructure/clients/${selectedClient}/email/${encodeURIComponent(editingMailbox.address)}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ password: editPassword })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setEditingMailbox(null);
+        setEditPassword('');
+        showFeedback('Contraseña actualizada en Mailcow.');
+      } else {
+        showError(data.error || 'No se pudo cambiar la contraseña.');
       }
     } catch {
-      showFeedback('Buzón de correo eliminado (Simulado).');
+      showError('Error de red al cambiar la contraseña.');
+    }
+  };
+
+  const handleUpdateEmailQuota = async (e) => {
+    e.preventDefault();
+    if (!editingMailbox) return;
+    try {
+      const res = await fetch(`/api/infrastructure/clients/${selectedClient}/email/${encodeURIComponent(editingMailbox.address)}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ quota: editQuota })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setEditingMailbox(null);
+        fetchClientData();
+        showFeedback('Cuota actualizada en Mailcow.');
+      } else {
+        showError(data.error || 'No se pudo cambiar la cuota.');
+      }
+    } catch {
+      showError('Error de red al cambiar la cuota.');
     }
   };
 
   const showFeedback = (msg) => {
+    setErrorMessage(null);
     setMessage(msg);
     setTimeout(() => setMessage(null), 4000);
+  };
+
+  const showError = (msg) => {
+    setMessage(null);
+    setErrorMessage(msg);
+    setTimeout(() => setErrorMessage(null), 6000);
   };
 
   return (
@@ -231,6 +300,24 @@ export default function InfraClientPanel({ token, clients }) {
           gap: '0.5rem'
         }}>
           <CheckCircle2 size={16} /> {message}
+        </div>
+      )}
+
+      {errorMessage && (
+        <div style={{
+          backgroundColor: '#fee2e2',
+          border: '1px solid #fecaca',
+          borderRadius: 'var(--radius-md)',
+          padding: '1rem 1.25rem',
+          marginBottom: '1.5rem',
+          color: '#991b1b',
+          fontWeight: '700',
+          fontSize: '0.875rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          <XCircle size={16} /> {errorMessage}
         </div>
       )}
 
@@ -457,37 +544,125 @@ export default function InfraClientPanel({ token, clients }) {
                   </form>
                 )}
 
+                {emails.length === 0 && !loading && (
+                  <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                    Este cliente no tiene casillas de correo en Mailcow para {currentClientObj?.domain}.
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                  {emails.map((mail, idx) => (
-                    <div key={idx} style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '1rem 1.25rem',
-                      border: '1px solid var(--border-default)',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: '#ffffff'
-                    }}>
-                      <div>
-                        <div style={{ fontWeight: '800', fontSize: '0.925rem', color: 'var(--text-main)' }}>{mail.address}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-sub)', marginTop: '0.2rem' }}>
-                          Cuota: {mail.used_mb} MB / {mail.quota_mb} MB ({((mail.used_mb / mail.quota_mb) * 100).toFixed(1)}%)
+                  {emails.map((mail, idx) => {
+                    const isActive = mail.status === 'ACTIVE';
+                    const isEditingThis = editingMailbox?.address === mail.address;
+                    const pct = mail.quota_mb > 0 ? ((mail.used_mb / mail.quota_mb) * 100).toFixed(1) : '0.0';
+                    return (
+                      <div key={idx} style={{
+                        border: '1px solid var(--border-default)',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundColor: '#ffffff'
+                      }}>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '1rem 1.25rem',
+                          flexWrap: 'wrap',
+                          gap: '0.75rem'
+                        }}>
+                          <div>
+                            <div style={{ fontWeight: '800', fontSize: '0.925rem', color: 'var(--text-main)' }}>{mail.address}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-sub)', marginTop: '0.2rem' }}>
+                              Cuota: {mail.used_mb} MB / {mail.quota_mb} MB ({pct}%)
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span style={{
+                              fontSize: '0.75rem', fontWeight: '800',
+                              color: isActive ? '#15803d' : '#991b1b',
+                              backgroundColor: isActive ? '#dcfce7' : '#fee2e2',
+                              padding: '0.25rem 0.55rem', borderRadius: '4px'
+                            }}>
+                              {isActive ? 'Activo' : 'Inactivo'}
+                            </span>
+                            <button
+                              className="copy-btn"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
+                              onClick={() => {
+                                setEditPassword('');
+                                setEditingMailbox(isEditingThis && editingMailbox.mode === 'password' ? null : { address: mail.address, mode: 'password' });
+                              }}
+                              title="Cambiar contraseña"
+                            >
+                              <Key size={13} /> Contraseña
+                            </button>
+                            <button
+                              className="copy-btn"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
+                              onClick={() => {
+                                setEditQuota(mail.quota_mb || 1024);
+                                setEditingMailbox(isEditingThis && editingMailbox.mode === 'quota' ? null : { address: mail.address, mode: 'quota' });
+                              }}
+                              title="Cambiar cuota"
+                            >
+                              <Gauge size={13} /> Cuota
+                            </button>
+                            <button
+                              onClick={() => handleDeleteEmail(mail.address)}
+                              style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', padding: '0.25rem' }}
+                              title="Eliminar casilla"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </div>
+
+                        {isEditingThis && editingMailbox.mode === 'password' && (
+                          <form onSubmit={handleUpdateEmailPassword} style={{ padding: '0 1.25rem 1.25rem', display: 'flex', gap: '0.65rem', alignItems: 'flex-end' }}>
+                            <div className="form-group" style={{ margin: 0, flex: 1 }}>
+                              <label className="form-label">Nueva contraseña (mín. 8 caracteres)</label>
+                              <input
+                                type="password"
+                                className="form-input"
+                                placeholder="Nueva clave segura..."
+                                value={editPassword}
+                                onChange={(e) => setEditPassword(e.target.value)}
+                                autoFocus
+                              />
+                            </div>
+                            <button type="submit" className="btn btn-primary" style={{ padding: '0.55rem 1.1rem', fontSize: '0.8rem' }} disabled={editPassword.length < 8}>
+                              Guardar
+                            </button>
+                            <button type="button" className="btn btn-secondary" style={{ padding: '0.55rem 0.85rem', fontSize: '0.8rem' }} onClick={() => setEditingMailbox(null)}>
+                              Cancelar
+                            </button>
+                          </form>
+                        )}
+
+                        {isEditingThis && editingMailbox.mode === 'quota' && (
+                          <form onSubmit={handleUpdateEmailQuota} style={{ padding: '0 1.25rem 1.25rem', display: 'flex', gap: '0.65rem', alignItems: 'flex-end' }}>
+                            <div className="form-group" style={{ margin: 0, flex: 1 }}>
+                              <label className="form-label">Nueva cuota: {editQuota} MB</label>
+                              <input
+                                type="range"
+                                min="128"
+                                max="10240"
+                                step="128"
+                                style={{ width: '100%' }}
+                                value={editQuota}
+                                onChange={(e) => setEditQuota(Number(e.target.value))}
+                              />
+                            </div>
+                            <button type="submit" className="btn btn-primary" style={{ padding: '0.55rem 1.1rem', fontSize: '0.8rem' }}>
+                              Guardar
+                            </button>
+                            <button type="button" className="btn btn-secondary" style={{ padding: '0.55rem 0.85rem', fontSize: '0.8rem' }} onClick={() => setEditingMailbox(null)}>
+                              Cancelar
+                            </button>
+                          </form>
+                        )}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <span style={{ fontSize: '0.75rem', fontWeight: '800', color: '#15803d', backgroundColor: '#dcfce7', padding: '0.25rem 0.55rem', borderRadius: '4px' }}>
-                          En Línea
-                        </span>
-                        <button 
-                          onClick={() => handleDeleteEmail(mail.address)}
-                          style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', padding: '0.25rem' }}
-                          title="Eliminar casilla"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

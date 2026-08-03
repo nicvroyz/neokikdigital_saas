@@ -49,6 +49,7 @@ router.post('/clients/:id/db/backup', infrastructureController.backupClientDB);
 router.post('/clients/:id/db/optimize', infrastructureController.optimizeClientDB);
 router.get('/clients/:id/emails', infrastructureController.getClientEmails);
 router.post('/clients/:id/email', infrastructureController.createEmailAccount);
+router.patch('/clients/:id/email/:address', infrastructureController.updateEmailAccount);
 router.delete('/clients/:id/email/:address', infrastructureController.deleteEmailAccount);
 
 export default router;

@@ -10,11 +10,87 @@ import os from 'os';
 import { execSync } from 'child_process';
 import { monitoringService } from '../services/monitoringService';
 import { mailcowService } from '../services/mailcowService';
+import { dnsAnalyzerService } from '../services/dnsAnalyzerService';
+import { sslService } from '../services/sslService';
+import { dockerService } from '../services/dockerService';
+import { databaseService } from '../services/databaseService';
+import { storageService } from '../services/storageService';
 import http from 'http';
+import tls from 'tls';
 import fs from 'fs';
+import path from 'path';
 import { randomUUID } from 'crypto';
 
 const DOMAIN_REGEX = /^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})+$/;
+
+// Mocks/local fallbacks below exist ONLY for local development convenience. In
+// production (NODE_ENV=production) they must never be reachable — an
+// infrastructure failure there has to surface as a real error, never as
+// fabricated data.
+function isInfraDryRun(): boolean {
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
+  return !!config.migration.dryRun;
+}
+
+function clientDbName(domain: string): string {
+  return `db_${domain.replace(/[^a-zA-Z0-9]/g, '_')}`;
+}
+
+function getCertificateInfo(domain: string, timeoutMs = 5000): Promise<{ issuer: string; valid_from: string; valid_until: string } | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: { issuer: string; valid_from: string; valid_until: string } | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    try {
+      const socket = tls.connect({ host: domain, port: 443, servername: domain, timeout: timeoutMs, rejectUnauthorized: false }, () => {
+        const cert = socket.getPeerCertificate();
+        socket.end();
+        if (!cert || !cert.valid_to) {
+          finish(null);
+          return;
+        }
+        const issuerOrg = cert.issuer?.O ?? cert.issuer?.CN;
+        finish({
+          issuer: (Array.isArray(issuerOrg) ? issuerOrg[0] : issuerOrg) || "Let's Encrypt",
+          valid_from: new Date(cert.valid_from).toISOString(),
+          valid_until: new Date(cert.valid_to).toISOString(),
+        });
+      });
+      socket.on('error', () => finish(null));
+      socket.on('timeout', () => { socket.destroy(); finish(null); });
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+function parseClientLogLines(raw: string, type: string): Array<{ timestamp: string; level: string; message: string }> {
+  if (!raw) return [];
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  return lines.map(line => {
+    if (type === 'caddy') {
+      try {
+        const obj = JSON.parse(line);
+        const req = obj.request ? `${obj.request.method || ''} ${obj.request.uri || ''}`.trim() : '';
+        const status = obj.status !== undefined ? `- ${obj.status}` : '';
+        return {
+          timestamp: obj.ts ? new Date(obj.ts * 1000).toISOString() : new Date().toISOString(),
+          level: String(obj.level || 'info').toUpperCase(),
+          message: [obj.msg, req, status].filter(Boolean).join(' ') || line,
+        };
+      } catch {
+        return { timestamp: new Date().toISOString(), level: 'INFO', message: line };
+      }
+    }
+    return { timestamp: new Date().toISOString(), level: 'INFO', message: line };
+  });
+}
 
 function bytesToMb(bytes: number | string | undefined | null): number {
   const n = typeof bytes === 'string' ? parseInt(bytes, 10) : (bytes || 0);
@@ -384,28 +460,11 @@ export const infrastructureController = {
         return res.status(400).json({ error: 'Dominio requerido' });
       }
 
-      const dnsReport = {
-        domain,
-        current_ns: ['ns1.registrar-actual.cl', 'ns2.registrar-actual.cl'],
-        required_ns: [`ns1.${config.platformDomain}`, `ns2.${config.platformDomain}`],
-        a_record: { current: '192.168.1.1', required: '152.0.0.1' },
-        mx_records: [
-          { priority: 10, value: 'mail.registrar-actual.cl' },
-        ],
-        txt_records: ['v=spf1 include:_spf.registrar-actual.cl ~all'],
-        propagation_complete: false,
-        estimated_propagation_hours: 24,
-        recommendations: [
-          'Actualizar registros NS en el registrador del dominio',
-          'Configurar registro A apuntando a 152.0.0.1',
-          'Actualizar registros MX para Mailcow',
-        ],
-      };
-
+      const dnsReport = await dnsAnalyzerService.analyzeDomain(domain, config.infrastructure.vpsIP);
       return res.json(dnsReport);
     } catch (err) {
       console.error('Error analyzing DNS:', err);
-      return res.status(500).json({ error: 'Error al analizar DNS' });
+      return res.status(502).json({ error: `Error al analizar DNS de ${req.params.domain}: ${(err as Error).message}` });
     }
   },
 
@@ -418,20 +477,24 @@ export const infrastructureController = {
         return res.status(400).json({ error: 'Dominio requerido' });
       }
 
-      const sslResult = {
-        domain,
-        status: 'ISSUED',
-        issuer: "Let's Encrypt",
-        valid_from: new Date().toISOString(),
-        valid_until: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
-        auto_renew: true,
-        message: `Certificado SSL emitido exitosamente para ${domain}`,
-      };
+      // Reloads Caddy so it picks up/renews on-demand TLS for the domain.
+      await sslService.configureSSL(domain);
+      const certInfo = isInfraDryRun() ? null : await getCertificateInfo(domain);
 
-      return res.json(sslResult);
+      return res.json({
+        domain,
+        status: certInfo ? 'ISSUED' : 'PENDING',
+        issuer: certInfo?.issuer || "Let's Encrypt",
+        valid_from: certInfo?.valid_from || null,
+        valid_until: certInfo?.valid_until || null,
+        auto_renew: true,
+        message: certInfo
+          ? `Certificado SSL activo para ${domain}`
+          : `Configuración de Caddy actualizada para ${domain}. Caddy emitirá el certificado Let's Encrypt automáticamente en la primera solicitud HTTPS.`,
+      });
     } catch (err) {
       console.error('Error issuing SSL:', err);
-      return res.status(500).json({ error: 'Error al emitir certificado SSL' });
+      return res.status(502).json({ error: `Error al emitir/renovar el certificado SSL para ${req.params.domain}: ${(err as Error).message}` });
     }
   },
 
@@ -584,17 +647,26 @@ export const infrastructureController = {
       if (client.rows.length === 0) {
         return res.status(404).json({ error: 'Cliente no encontrado' });
       }
+
+      const domain = client.rows[0].domain;
+      await dockerService.restartContainer(domain);
+
       return res.json({
-        message: `Servicios reiniciados para ${client.rows[0].domain}`,
-        services_restarted: ['caddy', 'docker-container'],
+        message: `Contenedor Docker reiniciado para ${domain}`,
+        services_restarted: ['docker-container'],
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
       console.error('Error restarting client services:', err);
-      return res.status(500).json({ error: 'Error al reiniciar los servicios del cliente' });
+      return res.status(502).json({ error: `Error al reiniciar los servicios del cliente: ${(err as Error).message}` });
     }
   },
 
+  // WordPress reconoce nativamente un archivo `.maintenance` en su raíz para
+  // mostrar la pantalla "Brevemente no disponible por mantenimiento" (hasta
+  // ~10 min por diseño de WP core). No existe hoy una directiva de Caddy ni
+  // otro mecanismo para sitios no-WordPress, así que esto solo tiene efecto
+  // visible en clientes WORDPRESS.
   async toggleMaintenance(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -602,38 +674,53 @@ export const infrastructureController = {
       if (client.rows.length === 0) {
         return res.status(404).json({ error: 'Cliente no encontrado' });
       }
-      const enabled = req.body.enabled !== undefined ? req.body.enabled : true;
+
+      const domain = client.rows[0].domain;
+      const enabled = req.body.enabled !== undefined ? !!req.body.enabled : true;
+
+      if (!isInfraDryRun()) {
+        const maintenanceFile = path.join(config.infrastructure.clientSitesPath, domain, 'public_html', '.maintenance');
+        if (enabled) {
+          fs.mkdirSync(path.dirname(maintenanceFile), { recursive: true });
+          fs.writeFileSync(maintenanceFile, `<?php $upgrading = ${Math.floor(Date.now() / 1000)}; // Activado desde el panel Neokik\n`);
+        } else if (fs.existsSync(maintenanceFile)) {
+          fs.unlinkSync(maintenanceFile);
+        }
+      }
+
       return res.json({
         message: enabled
-          ? `Modo mantenimiento activado para ${client.rows[0].domain}`
-          : `Modo mantenimiento desactivado para ${client.rows[0].domain}`,
+          ? `Modo mantenimiento activado para ${domain}`
+          : `Modo mantenimiento desactivado para ${domain}`,
         maintenance_mode: enabled,
-        domain: client.rows[0].domain,
+        domain,
+        note: 'Aplica el mecanismo nativo de WordPress (.maintenance); no tiene efecto en sitios no-WordPress.',
       });
     } catch (err) {
       console.error('Error toggling maintenance mode:', err);
-      return res.status(500).json({ error: 'Error al cambiar el modo de mantenimiento' });
+      return res.status(502).json({ error: `Error al cambiar el modo de mantenimiento: ${(err as Error).message}` });
     }
   },
 
   async getClientLogs(req: Request, res: Response) {
     try {
       const { id } = req.params;
+      const type = req.query.type === 'app' ? 'app' : 'caddy';
       const client = await query('SELECT * FROM clients WHERE id = $1', [id]);
       if (client.rows.length === 0) {
         return res.status(404).json({ error: 'Cliente no encontrado' });
       }
-      const logs = [
-        { timestamp: new Date(Date.now() - 300000).toISOString(), level: 'INFO', message: 'GET /index.php - 200 OK - 45ms' },
-        { timestamp: new Date(Date.now() - 240000).toISOString(), level: 'INFO', message: 'GET /wp-admin/ - 200 OK - 120ms' },
-        { timestamp: new Date(Date.now() - 180000).toISOString(), level: 'WARNING', message: 'POST /xmlrpc.php - 403 Forbidden (blocked)' },
-        { timestamp: new Date(Date.now() - 120000).toISOString(), level: 'INFO', message: 'GET /wp-content/uploads/2026/06/imagen.webp - 200 OK - 8ms' },
-        { timestamp: new Date(Date.now() - 60000).toISOString(), level: 'INFO', message: 'GET /wp-json/wp/v2/posts - 200 OK - 95ms' },
-      ];
-      return res.json({ domain: client.rows[0].domain, logs });
+
+      const domain = client.rows[0].domain;
+      const rawLogs = type === 'app'
+        ? await dockerService.getContainerLogs(domain)
+        : await dockerService.getCaddyAccessLog(domain);
+
+      const logs = parseClientLogLines(rawLogs, type);
+      return res.json({ domain, logs });
     } catch (err) {
       console.error('Error fetching client logs:', err);
-      return res.status(500).json({ error: 'Error al obtener los logs del cliente' });
+      return res.status(502).json({ error: `Error al obtener los logs del cliente: ${(err as Error).message}` });
     }
   },
 
@@ -644,23 +731,40 @@ export const infrastructureController = {
       if (client.rows.length === 0) {
         return res.status(404).json({ error: 'Cliente no encontrado' });
       }
-      const diskUsage = {
-        domain: client.rows[0].domain,
-        total_mb: 2048,
-        used_mb: 847,
-        usage_percent: 41.4,
-        breakdown: {
-          website_files_mb: 523,
-          database_mb: 189,
-          email_mb: 87,
-          logs_mb: 34,
-          backups_mb: 14,
-        },
+
+      const domain = client.rows[0].domain;
+      const dbName = clientDbName(domain);
+      const siteDir = path.join(config.infrastructure.clientSitesPath, domain, 'public_html');
+
+      const [websiteBytes, databaseMb, mailboxes, backupsSum] = await Promise.all([
+        storageService.getDirectorySizeBytes(siteDir),
+        databaseService.getDatabaseSizeMb(dbName).catch(() => 0),
+        mailcowService.listMailboxes(domain).catch(() => []),
+        query('SELECT COALESCE(SUM(file_size), 0) AS total FROM backups WHERE client_id = $1', [id]),
+      ]);
+
+      const emailMb = Array.isArray(mailboxes)
+        ? mailboxes.reduce((sum: number, mb: any) => sum + bytesToMb(mb.quota_used), 0)
+        : 0;
+      const websiteMb = bytesToMb(websiteBytes);
+      const backupsMb = bytesToMb(parseInt(backupsSum.rows[0]?.total || '0', 10));
+
+      const breakdown = {
+        website_files_mb: websiteMb,
+        database_mb: databaseMb,
+        email_mb: Math.round(emailMb * 100) / 100,
+        backups_mb: backupsMb,
       };
-      return res.json(diskUsage);
+      const usedMb = Math.round((websiteMb + databaseMb + emailMb + backupsMb) * 100) / 100;
+
+      return res.json({
+        domain,
+        used_mb: usedMb,
+        breakdown,
+      });
     } catch (err) {
       console.error('Error fetching disk usage:', err);
-      return res.status(500).json({ error: 'Error al obtener el uso de disco' });
+      return res.status(502).json({ error: `Error al obtener el uso de disco: ${(err as Error).message}` });
     }
   },
 
@@ -672,23 +776,29 @@ export const infrastructureController = {
         return res.status(404).json({ error: 'Cliente no encontrado' });
       }
 
+      const domain = client.rows[0].domain;
+      const dbName = clientDbName(domain);
       const fileUUID = randomUUID();
-      const filename = `backup-${client.rows[0].domain}-db-${new Date().toISOString().split('T')[0]}.sql.gz`;
+      const filename = `backup-${domain}-db-${new Date().toISOString().split('T')[0]}.sql.gz`;
+      const filePath = path.join(config.infrastructure.backupPath, `${fileUUID}.sql.gz`);
+
+      const { sizeBytes } = await databaseService.dumpDatabase(dbName, filePath);
 
       const result = await query(
         `INSERT INTO backups (client_id, filename, file_path, file_size, backup_type, version, notes, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [id, filename, `/uploads/backups/${fileUUID}.sql.gz`, 52428800, 'DATABASE_SQL', 1, 'Respaldo manual de base de datos', new Date().toISOString()]
+        [id, filename, filePath, sizeBytes, 'DATABASE_SQL', 1, 'Respaldo manual de base de datos', new Date().toISOString()]
       );
 
       return res.json({
-        message: `Respaldo de base de datos creado para ${client.rows[0].domain}`,
+        message: `Respaldo de base de datos creado para ${domain}`,
         backup_id: result.rows[0].id,
         filename,
+        file_size: sizeBytes,
       });
     } catch (err) {
       console.error('Error backing up client database:', err);
-      return res.status(500).json({ error: 'Error al respaldar la base de datos del cliente' });
+      return res.status(502).json({ error: `Error al respaldar la base de datos del cliente: ${(err as Error).message}` });
     }
   },
 
@@ -699,15 +809,20 @@ export const infrastructureController = {
       if (client.rows.length === 0) {
         return res.status(404).json({ error: 'Cliente no encontrado' });
       }
+
+      const domain = client.rows[0].domain;
+      const dbName = clientDbName(domain);
+      const result = await databaseService.optimizeTables(dbName);
+
       return res.json({
-        message: `Base de datos optimizada para ${client.rows[0].domain}`,
-        tables_optimized: 47,
-        space_freed_mb: 12.3,
-        duration_seconds: 8.5,
+        message: `Base de datos optimizada para ${domain}`,
+        tables_optimized: result.tablesOptimized,
+        space_freed_mb: result.spaceFreedMb,
+        duration_seconds: result.durationSeconds,
       });
     } catch (err) {
       console.error('Error optimizing client database:', err);
-      return res.status(500).json({ error: 'Error al optimizar la base de datos del cliente' });
+      return res.status(502).json({ error: `Error al optimizar la base de datos del cliente: ${(err as Error).message}` });
     }
   },
 

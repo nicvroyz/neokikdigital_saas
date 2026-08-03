@@ -17,7 +17,7 @@ export default function InfraClientPanel({ token, clients }) {
   const [logType, setLogType] = useState('caddy');
   const [message, setMessage] = useState(null);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
-  const [sslStatus, setSslStatus] = useState({ valid: true, expires_in: '82 días', issuer: "Let's Encrypt" });
+  const [sslStatus, setSslStatus] = useState({ valid: null, expires_in: 'sin verificar', issuer: "Let's Encrypt" });
   
   // Mail form states
   const [newMail, setNewMail] = useState({ local_part: '', password: '', quota: 1024 });
@@ -82,11 +82,14 @@ export default function InfraClientPanel({ token, clients }) {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showFeedback('Contenedor del sitio reiniciado correctamente.');
+        showFeedback(data.message || 'Contenedor del sitio reiniciado correctamente.');
+      } else {
+        showError(data.error || 'No se pudo reiniciar el contenedor del sitio.');
       }
     } catch {
-      showFeedback('Contenedor del sitio reiniciado correctamente (Simulado).');
+      showError('Error de red al reiniciar el contenedor del sitio.');
     }
   };
 
@@ -94,19 +97,21 @@ export default function InfraClientPanel({ token, clients }) {
     try {
       const res = await fetch(`/api/infrastructure/clients/${selectedClient}/maintenance`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ enabled: !maintenanceMode })
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        setMaintenanceMode(!maintenanceMode);
-        showFeedback(maintenanceMode ? 'Modo mantenimiento desactivado.' : 'Modo mantenimiento activado.');
+        setMaintenanceMode(!!data.maintenance_mode);
+        showFeedback(data.message || (maintenanceMode ? 'Modo mantenimiento desactivado.' : 'Modo mantenimiento activado.'));
+      } else {
+        showError(data.error || 'No se pudo cambiar el modo de mantenimiento.');
       }
     } catch {
-      setMaintenanceMode(!maintenanceMode);
-      showFeedback(maintenanceMode ? 'Modo mantenimiento desactivado (Simulado).' : 'Modo mantenimiento activado (Simulado).');
+      showError('Error de red al cambiar el modo de mantenimiento.');
     }
   };
 
@@ -116,11 +121,21 @@ export default function InfraClientPanel({ token, clients }) {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showFeedback('Certificado Let\'s Encrypt SSL renovado exitosamente.');
+        setSslStatus(prev => ({
+          valid: data.status === 'ISSUED',
+          issuer: data.issuer || prev.issuer,
+          expires_in: data.valid_until
+            ? `${Math.max(0, Math.round((new Date(data.valid_until) - new Date()) / (1000 * 60 * 60 * 24)))} días`
+            : 'pendiente de emisión',
+        }));
+        showFeedback(data.message || 'Certificado SSL actualizado.');
+      } else {
+        showError(data.error || 'No se pudo renovar el certificado SSL.');
       }
     } catch {
-      showFeedback('Certificado Let\'s Encrypt SSL renovado exitosamente (Simulado).');
+      showError('Error de red al renovar el certificado SSL.');
     }
   };
 
@@ -130,11 +145,14 @@ export default function InfraClientPanel({ token, clients }) {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showFeedback('Respaldo SQL de base de datos generado y guardado.');
+        showFeedback(data.message || 'Respaldo SQL de base de datos generado y guardado.');
+      } else {
+        showError(data.error || 'No se pudo generar el respaldo de la base de datos.');
       }
     } catch {
-      showFeedback('Respaldo SQL de base de datos generado exitosamente.');
+      showError('Error de red al generar el respaldo de la base de datos.');
     }
   };
 
@@ -144,11 +162,14 @@ export default function InfraClientPanel({ token, clients }) {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showFeedback('Tablas optimizadas. Se liberó espacio en base de datos.');
+        showFeedback(data.message || 'Tablas optimizadas. Se liberó espacio en base de datos.');
+      } else {
+        showError(data.error || 'No se pudo optimizar la base de datos.');
       }
     } catch {
-      showFeedback('Base de datos optimizada exitosamente.');
+      showError('Error de red al optimizar la base de datos.');
     }
   };
 
@@ -402,8 +423,22 @@ export default function InfraClientPanel({ token, clients }) {
                       Certificado SSL
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.85rem' }}>
-                      <ShieldCheck size={18} color="#22c55e" />
-                      <strong style={{ fontSize: '1.05rem', color: '#15803d' }}>Seguro (HTTPS)</strong>
+                      {sslStatus.valid ? (
+                        <>
+                          <ShieldCheck size={18} color="#22c55e" />
+                          <strong style={{ fontSize: '1.05rem', color: '#15803d' }}>Seguro (HTTPS)</strong>
+                        </>
+                      ) : sslStatus.valid === false ? (
+                        <>
+                          <ShieldAlert size={18} color="#ef4444" />
+                          <strong style={{ fontSize: '1.05rem', color: '#991b1b' }}>Sin certificado activo</strong>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldAlert size={18} color="#94a3b8" />
+                          <strong style={{ fontSize: '1.05rem', color: 'var(--text-sub)' }}>Sin verificar</strong>
+                        </>
+                      )}
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', color: 'var(--text-sub)' }}>
                       <span>Expira en {sslStatus.expires_in}</span>
@@ -412,20 +447,18 @@ export default function InfraClientPanel({ token, clients }) {
                   </div>
                 </div>
 
-                {/* Disk usage bar */}
+                {/* Disk usage breakdown */}
                 {diskUsage && (
                   <div style={{ marginBottom: '2rem', padding: '1.25rem', backgroundColor: '#f8fafc', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '800', fontSize: '0.9rem', marginBottom: '0.55rem' }}>
-                      <span>Uso de Disco Asignado</span>
-                      <span>{diskUsage.used_mb} MB / {diskUsage.total_mb} MB</span>
-                    </div>
-                    <div className="gauge-bar" style={{ marginBottom: '0.85rem' }}>
-                      <div className="gauge-bar-fill blue" style={{ width: `${diskUsage.usage_percent}%` }} />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '800', fontSize: '0.9rem', marginBottom: '0.85rem' }}>
+                      <span>Uso de Disco Real</span>
+                      <span>{diskUsage.used_mb} MB</span>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.85rem', fontSize: '0.75rem', color: 'var(--text-sub)' }}>
                       <div>● Sitio Web: <strong>{diskUsage.breakdown.website_files_mb} MB</strong></div>
                       <div>● Base de Datos: <strong>{diskUsage.breakdown.database_mb} MB</strong></div>
                       <div>● Correos: <strong>{diskUsage.breakdown.email_mb} MB</strong></div>
+                      <div>● Respaldos: <strong>{diskUsage.breakdown.backups_mb} MB</strong></div>
                     </div>
                   </div>
                 )}

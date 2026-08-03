@@ -4,13 +4,21 @@ import { containerTemplateService } from './containerTemplateService';
 import fs from 'fs';
 import path from 'path';
 
+// Dry-run mocks exist ONLY for local development convenience. In production
+// (NODE_ENV=production) they must never be reachable — a Docker/Caddy failure
+// there has to surface as a real error, never as a fabricated success.
 function isDryRun(): boolean {
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
   return !!config.migration.dryRun;
 }
 
 function log(msg: string) {
   console.log(`[DOCKER SERVICE] ${msg}`);
 }
+
+const CADDY_CONTAINER_NAME = 'neokik-caddy';
 
 function validateShellSafe(...inputs: string[]) {
   const safeRegex = /^[a-zA-Z0-9_.-]+$/;
@@ -116,6 +124,51 @@ export const dockerService = {
       return { success: true };
     } catch (err) {
       throw new Error(`Error al detener contenedor: ${(err as Error).message}`);
+    }
+  },
+
+  async restartContainer(domain: string): Promise<any> {
+    log(`Reiniciando contenedor para: ${domain}`);
+    if (isDryRun()) return { success: true };
+
+    const containerName = domain.replace(/[^a-zA-Z0-9]/g, '_');
+    validateShellSafe(domain, containerName);
+
+    try {
+      execFileSync('docker', ['restart', containerName]);
+      return { success: true };
+    } catch (err) {
+      throw new Error(`Error al reiniciar contenedor: ${(err as Error).message}`);
+    }
+  },
+
+  async getContainerLogs(domain: string, tail = 200): Promise<string> {
+    if (isDryRun()) return '';
+
+    const containerName = domain.replace(/[^a-zA-Z0-9]/g, '_');
+    validateShellSafe(domain, containerName);
+
+    try {
+      return execFileSync('docker', ['logs', '--tail', String(tail), containerName], { stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 }).toString();
+    } catch (err) {
+      throw new Error(`Error al obtener logs del contenedor: ${(err as Error).message}`);
+    }
+  },
+
+  async getCaddyAccessLog(domain: string, tail = 200): Promise<string> {
+    if (isDryRun()) return '';
+
+    validateShellSafe(domain);
+
+    try {
+      return execFileSync(
+        'docker',
+        ['exec', CADDY_CONTAINER_NAME, 'tail', '-n', String(tail), `/var/log/caddy/${domain}.log`],
+        { stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 }
+      ).toString();
+    } catch {
+      // El archivo aún no existe si el sitio no ha recibido tráfico todavía.
+      return '';
     }
   },
 

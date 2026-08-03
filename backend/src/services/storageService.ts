@@ -129,6 +129,27 @@ export const storageService = {
     }
   },
 
+  async getDirectorySizeBytes(targetPath: string): Promise<number> {
+    if (!fs.existsSync(targetPath)) return 0;
+
+    const stat = fs.statSync(targetPath);
+    if (!stat.isDirectory()) return stat.size;
+
+    let total = 0;
+    const entries = fs.readdirSync(targetPath);
+    for (const entry of entries) {
+      const full = path.join(targetPath, entry);
+      try {
+        const entryStat = fs.lstatSync(full);
+        if (entryStat.isSymbolicLink()) continue;
+        total += entryStat.isDirectory() ? await this.getDirectorySizeBytes(full) : entryStat.size;
+      } catch {
+        // Skip entries that became unreadable/removed mid-scan
+      }
+    }
+    return total;
+  },
+
   async createTemp(prefix: string): Promise<string> {
     const parentDir = path.join(os.tmpdir(), 'neokik-migration');
     await fs.promises.mkdir(parentDir, { recursive: true });

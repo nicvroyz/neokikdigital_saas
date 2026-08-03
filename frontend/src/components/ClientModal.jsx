@@ -67,10 +67,12 @@ export default function ClientModal({ isOpen, onClose, onSubmit, initialData }) 
     onSubmit(formData);
   };
 
+  // Labels only (renamed to match the commercial plans) — the stored
+  // service_type values are unchanged, so this is purely cosmetic.
   const serviceOptions = [
-    { value: 'HOSTING_AND_MAINTENANCE', label: 'Hosting + Mantenimiento Web' },
-    { value: 'WEB_HOSTING', label: 'Hosting Web Único' },
-    { value: 'MAINTENANCE', label: 'Mantenimiento Web Único' },
+    { value: 'HOSTING_AND_MAINTENANCE', label: 'Plan Empresarial' },
+    { value: 'WEB_HOSTING', label: 'Plan Esencial' },
+    { value: 'MAINTENANCE', label: 'Plan eCommerce' },
     { value: 'CUSTOM', label: 'Plan Personalizado' },
   ];
 

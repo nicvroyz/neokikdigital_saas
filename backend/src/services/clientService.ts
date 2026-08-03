@@ -110,7 +110,15 @@ export const clientService = {
     
     if (res.rows.length > 0) {
       const client = res.rows[0];
-      await hostingService.applyCaddyConfig(client.domain, client.doc_root, client.status === 'SUSPENDED');
+      // Best-effort: clients registered manually (never provisioned by the
+      // migration engine) don't have a real Docker/Caddy site behind them, so
+      // this sync legitimately fails for them. That must not block saving the
+      // client's own fields (name, email, plan, etc.).
+      try {
+        await hostingService.applyCaddyConfig(client.domain, client.doc_root, client.status === 'SUSPENDED');
+      } catch (err) {
+        console.error(`[CLIENT SERVICE] Warning: Caddy sync failed for ${client.domain} during update, client fields were still saved:`, err);
+      }
     }
 
     return res.rows[0];

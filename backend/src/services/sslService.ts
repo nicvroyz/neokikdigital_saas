@@ -1,7 +1,13 @@
 import { execSync } from 'child_process';
 import { config } from '../config/env';
 
+// Dry-run mock exists ONLY for local development convenience. In production
+// (NODE_ENV=production) it must never be reachable — a Caddy reload failure
+// there has to surface as a real error, never as a fabricated success.
 function isDryRun(): boolean {
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
   return !!config.migration.dryRun;
 }
 

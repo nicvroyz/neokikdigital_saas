@@ -40,7 +40,14 @@ export interface DNSAnalysis {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// The simulated report exists ONLY for local development convenience. In
+// production (NODE_ENV=production) it must never be reachable — a DNS lookup
+// failure there has to surface as a real (INCORRECT/MISSING) result, never as
+// fabricated registrar data.
 function isDryRun(): boolean {
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
   return !!config.caddy.dryRun;
 }
 

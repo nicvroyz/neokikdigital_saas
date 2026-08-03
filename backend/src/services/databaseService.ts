@@ -5,7 +5,13 @@ import path from 'path';
 import readline from 'readline';
 import zlib from 'zlib';
 
+// Dry-run mocks exist ONLY for local development convenience. In production
+// (NODE_ENV=production) they must never be reachable — a MySQL failure there
+// has to surface as a real error, never as a fabricated success.
 function isDryRun(): boolean {
+  if (process.env.NODE_ENV === 'production') {
+    return false;
+  }
   return !!config.migration.dryRun;
 }
 
@@ -228,6 +234,107 @@ export const databaseService = {
       if (sanitizedPath && fs.existsSync(sanitizedPath)) {
         try { fs.unlinkSync(sanitizedPath); } catch { }
       }
+    }
+  },
+
+  async getDatabaseSizeMb(dbName: string): Promise<number> {
+    if (isDryRun()) return 0;
+
+    validateMySQLSafe(dbName);
+    const mysqlContainer = process.env.MYSQL_CONTAINER_NAME;
+    if (!mysqlContainer) {
+      throw new Error('Falta configurar la variable de entorno MYSQL_CONTAINER_NAME para el contenedor MySQL/MariaDB.');
+    }
+    const rootPass = config.db.password;
+
+    try {
+      const out = execFileSync(
+        'docker',
+        ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, '-N', '-e',
+          `SELECT COALESCE(ROUND(SUM(data_length + index_length) / 1024 / 1024, 2), 0) FROM information_schema.tables WHERE table_schema = '${dbName}';`],
+        { stdio: 'pipe' }
+      ).toString().trim();
+      return parseFloat(out) || 0;
+    } catch (err) {
+      throw new Error(`No se pudo calcular el tamaño de la base de datos ${dbName}: ${(err as Error).message}`);
+    }
+  },
+
+  async dumpDatabase(dbName: string, destFilePath: string): Promise<{ sizeBytes: number }> {
+    log(`Generando dump de base de datos: ${dbName} -> ${destFilePath}`);
+
+    if (isDryRun()) return { sizeBytes: 0 };
+
+    validateMySQLSafe(dbName);
+    const mysqlContainer = process.env.MYSQL_CONTAINER_NAME;
+    if (!mysqlContainer) {
+      throw new Error('Falta configurar la variable de entorno MYSQL_CONTAINER_NAME para el contenedor MySQL/MariaDB.');
+    }
+    const rootPass = config.db.password;
+
+    try {
+      const rawSql = execFileSync(
+        'docker',
+        ['exec', mysqlContainer, 'mysqldump', '-u', 'root', `-p${rootPass}`, dbName],
+        { maxBuffer: 1024 * 1024 * 1024 }
+      );
+
+      const destDir = path.dirname(destFilePath);
+      if (!fs.existsSync(destDir)) {
+        fs.mkdirSync(destDir, { recursive: true });
+      }
+
+      const gzipped = zlib.gzipSync(rawSql);
+      fs.writeFileSync(destFilePath, gzipped);
+
+      return { sizeBytes: gzipped.length };
+    } catch (err) {
+      console.error('[DATABASE SERVICE ERROR] Failed to dump database', err);
+      throw new Error(`No se pudo generar el respaldo de la base de datos ${dbName}: ${(err as Error).message}`);
+    }
+  },
+
+  async optimizeTables(dbName: string): Promise<{ tablesOptimized: number; spaceFreedMb: number; durationSeconds: number }> {
+    log(`Optimizando tablas de: ${dbName}`);
+    const startedAt = Date.now();
+
+    if (isDryRun()) return { tablesOptimized: 0, spaceFreedMb: 0, durationSeconds: 0 };
+
+    validateMySQLSafe(dbName);
+    const mysqlContainer = process.env.MYSQL_CONTAINER_NAME;
+    if (!mysqlContainer) {
+      throw new Error('Falta configurar la variable de entorno MYSQL_CONTAINER_NAME para el contenedor MySQL/MariaDB.');
+    }
+    const rootPass = config.db.password;
+
+    try {
+      const sizeBefore = await this.getDatabaseSizeMb(dbName);
+
+      const tablesOut = execFileSync(
+        'docker',
+        ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, dbName, '-N', '-e', 'SHOW TABLES;'],
+        { stdio: 'pipe' }
+      ).toString().trim();
+      const tables = tablesOut.split('\n').map(t => t.trim()).filter(Boolean);
+
+      if (tables.length === 0) {
+        return { tablesOptimized: 0, spaceFreedMb: 0, durationSeconds: Math.round((Date.now() - startedAt) / 100) / 10 };
+      }
+
+      const optimizeSql = tables.map(t => `OPTIMIZE TABLE \`${t.replace(/`/g, '')}\`;`).join(' ');
+      execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, dbName, '-e', optimizeSql]);
+
+      const sizeAfter = await this.getDatabaseSizeMb(dbName);
+      const spaceFreedMb = Math.max(0, Math.round((sizeBefore - sizeAfter) * 100) / 100);
+
+      return {
+        tablesOptimized: tables.length,
+        spaceFreedMb,
+        durationSeconds: Math.round((Date.now() - startedAt) / 100) / 10,
+      };
+    } catch (err) {
+      console.error('[DATABASE SERVICE ERROR] Failed to optimize tables', err);
+      throw new Error(`No se pudo optimizar la base de datos ${dbName}: ${(err as Error).message}`);
     }
   },
 

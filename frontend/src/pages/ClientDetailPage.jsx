@@ -460,7 +460,7 @@ export default function ClientDetailPage({ token, clients, clientId, onBack, onE
                 <div style={cardStyle}>
                   <div style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--text-sub)', textTransform: 'uppercase' }}>Uso de Disco</div>
                   <div style={{ fontSize: '1.05rem', fontWeight: '800', marginTop: '0.35rem' }}>
-                    {diskUsage ? `${diskUsage.used_mb} MB / ${diskUsage.total_mb} MB` : 'Cargando...'}
+                    {diskUsage ? `${diskUsage.used_mb} MB` : 'Cargando...'}
                   </div>
                 </div>
                 <div style={cardStyle}>
@@ -489,17 +489,15 @@ export default function ClientDetailPage({ token, clients, clientId, onBack, onE
 
               {diskUsage && (
                 <div style={{ marginBottom: '2rem', padding: '1.25rem', backgroundColor: '#f8fafc', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '800', fontSize: '0.9rem', marginBottom: '0.55rem' }}>
-                    <span>Uso de Disco Asignado</span>
-                    <span>{diskUsage.used_mb} MB / {diskUsage.total_mb} MB</span>
-                  </div>
-                  <div className="gauge-bar" style={{ marginBottom: '0.85rem' }}>
-                    <div className="gauge-bar-fill blue" style={{ width: `${diskUsage.usage_percent}%` }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '800', fontSize: '0.9rem', marginBottom: '0.85rem' }}>
+                    <span>Uso de Disco Real</span>
+                    <span>{diskUsage.used_mb} MB</span>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.85rem', fontSize: '0.75rem', color: 'var(--text-sub)' }}>
                     <div>● Sitio Web: <strong>{diskUsage.breakdown.website_files_mb} MB</strong></div>
                     <div>● Base de Datos: <strong>{diskUsage.breakdown.database_mb} MB</strong></div>
                     <div>● Correos: <strong>{diskUsage.breakdown.email_mb} MB</strong></div>
+                    <div>● Respaldos: <strong>{diskUsage.breakdown.backups_mb} MB</strong></div>
                   </div>
                 </div>
               )}

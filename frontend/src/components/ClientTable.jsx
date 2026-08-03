@@ -46,6 +46,18 @@ export default function ClientTable({ clients, onRenew, onEdit, onDelete, onMana
     }
   };
 
+  // Commercial plan (Esencial/Empresarial/eCommerce) inferred from the monthly
+  // price, since that's the only thing distinguishing them today: $30.000 =
+  // Esencial, $40.000 = Empresarial, more than $40.000 = eCommerce (priced
+  // "desde $40.000"). Anything else falls back to the generic service type.
+  const getPlanName = (client) => {
+    const amount = Math.round(Number(client.amount_per_period));
+    if (amount === 30000) return 'Plan Esencial';
+    if (amount === 40000) return 'Plan Empresarial';
+    if (amount > 40000) return 'Plan eCommerce';
+    return getServiceTypeSpanish(client.service_type);
+  };
+
   const getPlanIntervalSpanish = (interval) => {
     switch (interval) {
       case 'MONTHLY':
@@ -128,7 +140,7 @@ export default function ClientTable({ clients, onRenew, onEdit, onDelete, onMana
                   {client.domain} <ExternalLink size={13} />
                 </a>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-sub)', marginTop: '0.2rem', fontWeight: '600' }}>
-                  {getServiceTypeSpanish(client.service_type)}
+                  {getPlanName(client)}
                 </div>
               </td>
               <td>

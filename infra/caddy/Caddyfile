@@ -1,10 +1,17 @@
 # Configuración
 jacvroyz.cl {
         request_body {
-                max_size 10GB
+                max_size 50GB
         }
 
-        reverse_proxy /api/* backend:5000
+        reverse_proxy /api/* backend:5000 {
+                transport http {
+                        read_timeout 2h
+                        write_timeout 2h
+                        dial_timeout 30s
+                }
+        }
+
         reverse_proxy frontend:80
 }
 
@@ -17,7 +24,7 @@ api.jacvroyz.cl {
 }
 
 mail.jacvroyz.cl {
-	reverse_proxy https://nginx-mailcow:8443 {
+	reverse_proxy https://nginx-mailcow:443 {
 		transport http {
 			tls_insecure_skip_verify
 		}
@@ -44,4 +51,13 @@ www.papelesconcepcion.cl {
 files.jacvroyz.cl {
     reverse_proxy filebrowser:80
 }
+
+mail.tdd.cl {
+    reverse_proxy https://nginx-mailcow:443 {
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}
+
 import /etc/caddy/sites/*.caddy

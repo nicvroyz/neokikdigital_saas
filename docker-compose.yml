@@ -57,6 +57,7 @@ services:
       CLIENT_SITES_PATH: /srv/neokik/sites
       BACKUP_PATH: /srv/neokik/backups
       STORAGE_PATH: /srv/neokik/storage
+      WEBMAIL_SSO_SECRET: ${WEBMAIL_SSO_SECRET}
     volumes:
       - /etc/os-release:/host/os-release:ro
       - /etc/hostname:/host/hostname:ro

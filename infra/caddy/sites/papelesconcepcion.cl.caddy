@@ -1,0 +1,12 @@
+# Auto-generated Caddy Config for papelesconcepcion.cl [ACTIVE]
+papelesconcepcion.cl, www.papelesconcepcion.cl {
+    root * /srv/neokik/sites/papelesconcepcion.cl
+    php_fastcgi papelesconcepcion_cl:9000 {
+        root /var/www/html
+    }
+    file_server
+    encode gzip
+    log {
+        output file /var/log/caddy/papelesconcepcion.cl.log
+    }
+}

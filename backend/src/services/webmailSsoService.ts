@@ -32,7 +32,7 @@ export const webmailSsoService = {
     const token = `${payloadB64}.${signature}`;
 
     const base = config.mailcow.webmailUrl.replace(/\/$/, '');
-    const url = `${base}/sogo-auth.php?neokik_token=${encodeURIComponent(token)}`;
+    const url = `${base}/SOGo/so/${encodeURIComponent(email)}/Mail?neokik_token=${encodeURIComponent(token)}`;
 
     return { token, url };
   },

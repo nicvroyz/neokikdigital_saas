@@ -14,7 +14,30 @@ router.get('/provision/:id', infrastructureController.getProvision);
 router.get('/provisions', infrastructureController.getAllProvisions);
 
 // Migrations
-router.post('/migrations/upload', uploadMiddleware.array('files', 5), infrastructureController.uploadBackup);
+router.post(
+  '/migrations/upload',
+  (req, res, next) => {
+    req.on('aborted', () => {
+      console.log('[UPLOAD DEBUG] request aborted');
+    });
+
+    req.on('close', () => {
+      console.log('[UPLOAD DEBUG] request closed');
+    });
+
+    next();
+  },
+  (req, res, next) => {
+    uploadMiddleware.array('files', 5)(req, res, (err) => {
+      if (err) {
+        console.error('[UPLOAD DEBUG] multer error:', err);
+        return next(err);
+      }
+      next();
+    });
+  },
+  infrastructureController.uploadBackup
+);
 router.post('/migrations/:id/analyze', infrastructureController.analyzeBackup);
 router.post('/migrations/:id/simulate', infrastructureController.simulateMigration);
 router.post('/migrations/:id/execute', infrastructureController.executeMigration);

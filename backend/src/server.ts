@@ -88,9 +88,18 @@ workerProcessor.start();
 schedulerService.init();
 
 // Server listener
-app.listen(config.port, () => {
+const server = app.listen(config.port, () => {
   console.log(`=======================================================`);
   console.log(`🚀 Neokik Digital SaaS Backend + Infrastructure Engine running on port ${config.port}`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'production'}`);
   console.log(`=======================================================`);
+});
+
+// Allow long uploads (large migration backups)
+server.requestTimeout = 60 * 60 * 1000; // 1 hora
+server.headersTimeout = 61 * 60 * 1000; // ligeramente mayor que requestTimeout
+console.log('[SERVER TIMEOUTS]', {
+  requestTimeout: server.requestTimeout,
+  headersTimeout: server.headersTimeout,
+  timeout: server.timeout
 });

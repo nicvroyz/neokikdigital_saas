@@ -1,0 +1,12 @@
+# Auto-generated Caddy Config for tdd.cl [ACTIVE]
+tdd.cl, www.tdd.cl {
+    root * /srv/neokik/sites/tdd.cl/public_html
+    php_fastcgi tdd_cl:9000 {
+        root /var/www/html
+    }
+    file_server
+    encode gzip
+    log {
+        output file /var/log/caddy/tdd.cl.log
+    }
+}

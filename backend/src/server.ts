@@ -95,11 +95,12 @@ const server = app.listen(config.port, () => {
   console.log(`=======================================================`);
 });
 
-// Allow long uploads (large migration backups)
-server.requestTimeout = 60 * 60 * 1000; // 1 hora
-server.headersTimeout = 61 * 60 * 1000; // ligeramente mayor que requestTimeout
-console.log('[SERVER TIMEOUTS]', {
-  requestTimeout: server.requestTimeout,
-  headersTimeout: server.headersTimeout,
-  timeout: server.timeout
-});
+// Node's default requestTimeout (5 min) aborts large migration backup uploads
+// before the body finishes arriving. Matches Caddy's reverse_proxy transport
+// read_timeout/write_timeout (2h) so no layer cuts the connection before another.
+// headersTimeout is intentionally left at its default (60s): only the full
+// body transfer needs the long timeout, headers always arrive almost
+// instantly regardless of upload size, and Node requires headersTimeout to
+// stay at or below requestTimeout.
+server.requestTimeout = 2 * 60 * 60 * 1000; // 2 hours
+console.log(`[SERVER] requestTimeout set to ${server.requestTimeout}ms to support large migration backup uploads.`);

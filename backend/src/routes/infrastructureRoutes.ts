@@ -17,23 +17,17 @@ router.get('/provisions', infrastructureController.getAllProvisions);
 router.post(
   '/migrations/upload',
   (req, res, next) => {
-    req.on('aborted', () => {
-      console.log('[UPLOAD DEBUG] request aborted');
-    });
+    uploadMiddleware.array('files', 5)(req, res, (err: any) => {
+      if (!err) return next();
 
-    req.on('close', () => {
-      console.log('[UPLOAD DEBUG] request closed');
-    });
-
-    next();
-  },
-  (req, res, next) => {
-    uploadMiddleware.array('files', 5)(req, res, (err) => {
-      if (err) {
-        console.error('[UPLOAD DEBUG] multer error:', err);
-        return next(err);
+      console.error('[UPLOAD ERROR] Backup upload failed:', err);
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: 'El respaldo excede el tamaño máximo permitido para migraciones.' });
       }
-      next();
+      if (err.code === 'LIMIT_UNEXPECTED_FILE' || err.code === 'LIMIT_FILE_COUNT') {
+        return res.status(400).json({ error: 'Cantidad de archivos no permitida (máximo 5).' });
+      }
+      return res.status(400).json({ error: err.message || 'No se pudo procesar el respaldo subido.' });
     });
   },
   infrastructureController.uploadBackup

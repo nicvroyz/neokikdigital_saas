@@ -79,8 +79,12 @@ ${domain}, www.${domain} {
       }
 
       // Requirement 7 & 8: Validar configuración de Caddy antes de recargar
+      // (all execFileSync calls below have an explicit timeout: without one,
+      // a stuck `docker exec` blocks this whole synchronous call, and since
+      // it runs on Node's single thread, it freezes the ENTIRE backend process
+      // — not just this request — until it hangs or the client gives up.)
       try {
-        execFileSync('docker', ['exec', 'neokik-caddy', 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile'], { stdio: 'pipe' });
+        execFileSync('docker', ['exec', 'neokik-caddy', 'caddy', 'validate', '--config', '/etc/caddy/Caddyfile'], { stdio: 'pipe', timeout: 10000 });
         console.log(`[HOSTING ENGINE] Caddyfile validado exitosamente.`);
       } catch (valErr: any) {
         const stdout = valErr.stdout ? valErr.stdout.toString().trim() : '';
@@ -91,7 +95,7 @@ ${domain}, www.${domain} {
 
       // Requirement 8: Ejecutar reload si validate fue exitoso
       try {
-        execFileSync('docker', ['exec', 'neokik-caddy', 'caddy', 'reload', '--config', '/etc/caddy/Caddyfile'], { stdio: 'pipe' });
+        execFileSync('docker', ['exec', 'neokik-caddy', 'caddy', 'reload', '--config', '/etc/caddy/Caddyfile'], { stdio: 'pipe', timeout: 10000 });
         console.log(`[HOSTING ENGINE] Caddy recargado exitosamente.`);
       } catch (relErr: any) {
         const stderr = relErr.stderr ? relErr.stderr.toString().trim() : (relErr.message || '');
@@ -102,14 +106,14 @@ ${domain}, www.${domain} {
       // Requirement 9: Después del reload verificar existencia, lectura y activación
       try {
         // Verificar existencia en /etc/caddy/sites del contenedor
-        execFileSync('docker', ['exec', 'neokik-caddy', 'test', '-f', `/etc/caddy/sites/${fileName}`]);
+        execFileSync('docker', ['exec', 'neokik-caddy', 'test', '-f', `/etc/caddy/sites/${fileName}`], { timeout: 5000 });
       } catch (err) {
         throw new Error(`Verificación fallida: El archivo ${fileName} no existe en /etc/caddy/sites dentro del contenedor Caddy.`);
       }
 
       try {
         // Verificar permisos de lectura en /etc/caddy/sites del contenedor
-        execFileSync('docker', ['exec', 'neokik-caddy', 'test', '-r', `/etc/caddy/sites/${fileName}`]);
+        execFileSync('docker', ['exec', 'neokik-caddy', 'test', '-r', `/etc/caddy/sites/${fileName}`], { timeout: 5000 });
       } catch (err) {
         throw new Error(`Verificación fallida: El archivo ${fileName} en /etc/caddy/sites dentro del contenedor Caddy no tiene permisos de lectura.`);
       }
@@ -118,10 +122,10 @@ ${domain}, www.${domain} {
         // Verificar que la configuración haya quedado activa consultando el API de Caddy
         let configActiveJson = '';
         try {
-          configActiveJson = execFileSync('docker', ['exec', 'neokik-caddy', 'wget', '-qO-', 'http://localhost:2019/config/'], { stdio: 'pipe' }).toString();
+          configActiveJson = execFileSync('docker', ['exec', 'neokik-caddy', 'wget', '-qO-', 'http://localhost:2019/config/'], { stdio: 'pipe', timeout: 5000 }).toString();
         } catch (wgetErr) {
           try {
-            configActiveJson = execFileSync('docker', ['exec', 'neokik-caddy', 'curl', '-s', 'http://localhost:2019/config/'], { stdio: 'pipe' }).toString();
+            configActiveJson = execFileSync('docker', ['exec', 'neokik-caddy', 'curl', '-s', 'http://localhost:2019/config/'], { stdio: 'pipe', timeout: 5000 }).toString();
           } catch (curlErr) {
             console.warn(`[HOSTING ENGINE WARNING] No se pudo consultar la API de Caddy vía wget ni curl.`);
           }

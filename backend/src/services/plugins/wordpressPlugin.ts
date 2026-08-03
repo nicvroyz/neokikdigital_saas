@@ -61,6 +61,11 @@ async function getOrDetectTablePrefix(docRoot: string, dbName: string): Promise<
 // own php.ini/global memory_limit). Configurable via MIGRATION_PHP_MEMORY_LIMIT,
 // defaults to 1024M — see config.migration.phpMemoryLimit.
 const MIGRATION_PHP_MEMORY_LIMIT = config.migration.phpMemoryLimit;
+// WP_CLI_PHP_ARGS is not honored by this image (the phar is invoked directly
+// via its own shebang, which does not read that env var), so wp-cli calls
+// below invoke php themselves with -d memory_limit and pass the wp-cli phar
+// path as the script argument instead of relying on the `wp` wrapper.
+const WP_CLI_PHAR_PATH = '/usr/local/bin/wp';
 
 async function ensureWordpressDatabaseConnection(containerName: string): Promise<void> {
   log(`Verificando conectividad de WordPress con su base de datos usando PHP/MySQLi...`);
@@ -420,13 +425,13 @@ export const wordpressPlugin: FrameworkPlugin = {
     try {
       await ensureWordpressDatabaseConnection(containerName);
       
-      const stdout = execSync(`docker exec -e WP_CLI_PHP_ARGS="-d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}" ${containerName} wp option get siteurl --allow-root`, { timeout: 10000 }).toString().trim();
+      const stdout = execSync(`docker exec ${containerName} php -d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT} ${WP_CLI_PHAR_PATH} option get siteurl --allow-root`, { timeout: 10000 }).toString().trim();
       if (stdout && stdout.startsWith('http')) {
         log(`Dominio original detectado vía WP-CLI: ${stdout}`);
         return stdout;
       }
     } catch (wpCliErr: any) {
-      const cmd = `docker exec -e WP_CLI_PHP_ARGS="-d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}" ${containerName} wp option get siteurl --allow-root`;
+      const cmd = `docker exec ${containerName} php -d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT} ${WP_CLI_PHAR_PATH} option get siteurl --allow-root`;
       const stdout = wpCliErr.stdout ? wpCliErr.stdout.toString().trim() : '';
       const stderr = wpCliErr.stderr ? wpCliErr.stderr.toString().trim() : (wpCliErr.message || '');
       const status = wpCliErr.status !== undefined ? wpCliErr.status : -1;
@@ -497,7 +502,7 @@ export const wordpressPlugin: FrameworkPlugin = {
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           const siteUrl = execSync(
-            `docker exec -e WP_CLI_PHP_ARGS="-d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}" ${containerName} wp option get siteurl --allow-root`,
+            `docker exec ${containerName} php -d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT} ${WP_CLI_PHAR_PATH} option get siteurl --allow-root`,
             { stdio: 'pipe' }
           ).toString().trim();
           log(`HEALTH CHECK: Conexión a Base de Datos validada. siteurl resuelve a: "${siteUrl}"`);

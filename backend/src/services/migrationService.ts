@@ -36,11 +36,17 @@ function log(msg: string) {
 // transient failure (memory or a momentary DB hiccup) doesn't skip the step
 // on the first try.
 const MIGRATION_PHP_MEMORY_LIMIT = config.migration.phpMemoryLimit;
+// WP_CLI_PHP_ARGS is not honored by this image (the phar is invoked directly
+// via its own shebang, which does not read that env var), so we invoke php
+// ourselves with -d memory_limit and pass the wp-cli phar path as the script
+// argument. This is the actual documented way to run wp-cli under a specific
+// php.ini setting and is independent of any WP-CLI-internal env handling.
+const WP_CLI_PHAR_PATH = '/usr/local/bin/wp';
 
 function execWpCliWithRetry(containerName: string, args: string[], timeoutMs: number, label: string): void {
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      execFileSync('docker', ['exec', '-e', `WP_CLI_PHP_ARGS=-d memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}`, containerName, 'wp', ...args], { timeout: timeoutMs });
+      execFileSync('docker', ['exec', containerName, 'php', '-d', `memory_limit=${MIGRATION_PHP_MEMORY_LIMIT}`, WP_CLI_PHAR_PATH, ...args], { timeout: timeoutMs });
       return;
     } catch (err) {
       log(`Intento ${attempt}/2 fallido en ${label}: ${(err as Error).message}`);

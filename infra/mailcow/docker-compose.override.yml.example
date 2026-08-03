@@ -1,0 +1,13 @@
+# Copy this file to <mailcow-dockerized>/docker-compose.override.yml (merge with
+# any override you already have there) and run `docker compose up -d php-fpm-mailcow`
+# from inside your mailcow-dockerized directory. See docs/WEBMAIL_SSO.md for the
+# full walkthrough, including where NEOKIK_WEBMAIL_SSO_SECRET is set.
+#
+# This only bind-mounts one file — it does not fork or replace anything else in
+# your mailcow installation, and does not affect mailcow's own update process
+# (docker compose pull / update.sh) beyond this one mount.
+
+services:
+  php-fpm-mailcow:
+    volumes:
+      - /opt/neokikdigital_saas/infra/mailcow/sogo-auth.php:/web/sogo-auth.php:ro

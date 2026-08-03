@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft, Server, Database, Mail, Globe, Link2, ShieldCheck, Archive, Settings,
-  RefreshCw, Power, Plus, Trash2, Key, Gauge, CheckCircle2, XCircle, Edit2
+  RefreshCw, Power, Plus, Trash2, Key, Gauge, CheckCircle2, XCircle, Edit2, ExternalLink
 } from 'lucide-react';
 
 const SECTIONS = [
@@ -257,6 +257,22 @@ export default function ClientDetailPage({ token, clients, clientId, onBack, onE
       }
     } catch {
       showError('Error de red al cambiar la cuota.');
+    }
+  };
+
+  const handleOpenWebmail = async (address) => {
+    try {
+      const res = await fetch(`/api/clients/${clientId}/emails/${encodeURIComponent(address)}/webmail-token`, {
+        method: 'POST', headers
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) {
+        window.open(data.url, '_blank', 'noopener,noreferrer');
+      } else {
+        showError(data.error || 'No se pudo abrir el Webmail.');
+      }
+    } catch {
+      showError('Error de red al abrir el Webmail.');
     }
   };
 
@@ -600,6 +616,10 @@ export default function ClientDetailPage({ token, clients, clientId, onBack, onE
                           <span style={{ fontSize: '0.75rem', fontWeight: '800', color: isActive ? '#15803d' : '#991b1b', backgroundColor: isActive ? '#dcfce7' : '#fee2e2', padding: '0.25rem 0.55rem', borderRadius: '4px' }}>
                             {isActive ? 'Activo' : 'Inactivo'}
                           </span>
+                          <button className="copy-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
+                            onClick={() => handleOpenWebmail(mail.address)} disabled={!isActive} title={isActive ? 'Abrir Webmail sin contraseña' : 'Buzón suspendido'}>
+                            <ExternalLink size={13} /> Webmail
+                          </button>
                           <button className="copy-btn" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', padding: '0.25rem 0.55rem', fontSize: '0.75rem' }}
                             onClick={() => { setEditPassword(''); setEditingMailbox(isEditingThis && editingMailbox.mode === 'password' ? null : { address: mail.address, mode: 'password' }); }}>
                             <Key size={13} /> Contraseña

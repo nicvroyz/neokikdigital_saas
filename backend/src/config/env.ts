@@ -38,6 +38,14 @@ export const config = {
     apiUrl: process.env.MAILCOW_API_URL || 'http://localhost:8080',
     apiKey: process.env.MAILCOW_API_KEY || 'mailcow-api-key-placeholder',
     mailcowRequired: process.env.MAILCOW_REQUIRED === 'true',
+    webmailUrl: process.env.MAILCOW_WEBMAIL_URL || process.env.MAILCOW_API_URL || 'http://localhost:8080',
+  },
+  webmailSso: {
+    // Shared HMAC secret with the sogo-auth.php bridge deployed on the Mailcow host
+    // (see infra/mailcow/). No default: an empty/guessable secret would let anyone
+    // mint mailbox-impersonation tokens, so we fail closed instead.
+    secret: process.env.WEBMAIL_SSO_SECRET || '',
+    tokenTtlSeconds: 60,
   },
   infrastructure: {
     uploadsDir: process.env.UPLOADS_DIR || '/srv/neokik/storage/migrations',

@@ -19,6 +19,7 @@ router.get('/:id/emails', clientResourcesController.getClientEmails);
 router.post('/:id/emails', clientResourcesController.createEmailAccount);
 router.patch('/:id/emails/:address', clientResourcesController.updateEmailAccount);
 router.delete('/:id/emails/:address', clientResourcesController.deleteEmailAccount);
+router.post('/:id/emails/:address/webmail-token', clientResourcesController.createWebmailToken);
 
 router.get('/:id/domains', clientResourcesController.getClientDomains);
 router.post('/:id/domains', clientResourcesController.createClientDomain);

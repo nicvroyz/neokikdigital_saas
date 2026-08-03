@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { query } from '../config/db';
 import { mailcowService } from '../services/mailcowService';
+import { webmailSsoService } from '../services/webmailSsoService';
 
 const DOMAIN_REGEX = /^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.[A-Za-z0-9-]{1,63})+$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -194,6 +195,43 @@ export const clientResourcesController = {
       console.error('Error updating email account:', err);
       await insertResourceAuditLog(req, 'email:update', 'mailbox', id, email, { error: (err as Error).message }, 'FAILED');
       return res.status(502).json({ error: `Error al actualizar la cuenta de correo en Mailcow: ${(err as Error).message}` });
+    }
+  },
+
+  // ==================== WEBMAIL SSO ====================
+  // See infra/mailcow/sogo-auth.php and docs/WEBMAIL_SSO.md — the token is redeemed
+  // exactly once, within 60s, by a small bridge deployed on the Mailcow host itself.
+  // Neokik never sees or stores a mailbox password to make this work.
+
+  async createWebmailToken(req: AuthRequest, res: Response) {
+    const { id, address } = req.params;
+    const email = decodeURIComponent(address);
+    try {
+      if (!webmailSsoService.isConfigured()) {
+        return res.status(503).json({ error: 'El acceso directo a Webmail no está configurado (falta WEBMAIL_SSO_SECRET en el servidor).' });
+      }
+
+      const client = await getClientOr404(id, res);
+      if (!client) return;
+
+      if (!isEmailOfDomain(email, client.domain)) {
+        return res.status(403).json({ error: 'La casilla no pertenece a este cliente' });
+      }
+
+      const mailboxes = await mailcowService.listMailboxes(client.domain);
+      const mailboxExists = Array.isArray(mailboxes) && mailboxes.some((mb: any) => String(mb.username).toLowerCase() === email.toLowerCase());
+      if (!mailboxExists) {
+        return res.status(404).json({ error: 'La casilla no existe en Mailcow' });
+      }
+
+      const { url } = webmailSsoService.generateToken(email, id, req.user?.id);
+      await insertResourceAuditLog(req, 'email:webmail_access', 'mailbox', id, email, {}, 'SUCCESS');
+
+      return res.json({ url });
+    } catch (err) {
+      console.error('Error generating webmail SSO token:', err);
+      await insertResourceAuditLog(req, 'email:webmail_access', 'mailbox', id, email, { error: (err as Error).message }, 'FAILED');
+      return res.status(502).json({ error: `Error al generar el acceso a Webmail: ${(err as Error).message}` });
     }
   },
 

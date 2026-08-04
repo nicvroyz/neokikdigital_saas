@@ -58,7 +58,7 @@ export const clientService = {
 
   async createClient(data: ClientData) {
     const sanitizedDomain = data.domain.replace(/[^a-z0-9.-]/gi, '_');
-    const docRoot = data.doc_root || `${config.infrastructure.clientSitesPath}/${sanitizedDomain}`;
+    const docRoot = data.doc_root || `${config.infrastructure.clientSitesPath}/${sanitizedDomain}/public_html`;
     const status = data.status || 'ACTIVE';
     const graceDays = data.grace_period_days !== undefined ? data.grace_period_days : 5;
 

@@ -29,8 +29,15 @@ function validateMySQLSafe(...inputs: string[]) {
 }
 
 async function sanitizeSQLDump(srcPath: string, destPath: string): Promise<void> {
-  const readStream = fs.createReadStream(srcPath);
-  const writeStream = fs.createWriteStream(destPath);
+  // 'latin1' (not the default utf8) is required here: SQL dumps routinely
+  // embed raw binary data inside string literals (e.g. plugins storing
+  // packed binary IPs/hashes in VARBINARY columns). Decoding as utf8 mangles
+  // any byte sequence that isn't valid UTF-8 (replaced with U+FFFD), silently
+  // corrupting that data before it's ever imported. latin1 is a 1-byte-to-
+  // 1-char mapping, so read+write round-trips every byte unchanged while
+  // still letting the line-based ASCII pattern matching below work.
+  const readStream = fs.createReadStream(srcPath, { encoding: 'latin1' });
+  const writeStream = fs.createWriteStream(destPath, { encoding: 'latin1' });
 
   const rl = readline.createInterface({
     input: readStream,

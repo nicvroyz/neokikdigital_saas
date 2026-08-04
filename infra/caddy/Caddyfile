@@ -42,4 +42,12 @@ mail.tdd.cl {
     }
 }
 
+mail.aliagaingenieria.cl {
+    reverse_proxy https://nginx-mailcow:443 {
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+}
+
 import /etc/caddy/sites/*.caddy

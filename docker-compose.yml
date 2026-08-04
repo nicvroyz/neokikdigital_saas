@@ -22,6 +22,12 @@ services:
     image: mariadb:10.11
     container_name: neokik-mysql
     restart: always
+    # innodb_use_native_aio disabled: native AIO is frequently unsupported on
+    # the overlay/volume filesystems Docker uses, and InnoDB falling back to
+    # posix_fallocate() during a large transaction's COMMIT then fails with
+    # "Got error 1 'Operation not permitted' during COMMIT" (ERROR 1180) -
+    # hit when importing real-world dumps with big multi-row INSERTs.
+    command: --innodb-use-native-aio=0
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
     volumes:

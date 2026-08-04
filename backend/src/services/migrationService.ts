@@ -241,7 +241,19 @@ export const migrationService = {
           let sqlFile = '';
           if (fs.existsSync(sqlDir)) {
             const files = fs.readdirSync(sqlDir).filter(f => f.endsWith('.sql') || f.endsWith('.sql.gz'));
-            if (files.length > 0) sqlFile = path.join(sqlDir, files[0]);
+            if (files.length > 0) {
+              // cPanel backups can bundle multiple databases (e.g. webmail/CRM
+              // apps alongside the real site DB). Prefer the dump matching the
+              // database name the analyzer already detected for this project
+              // (e.g. WordPress's wp-config.php DB_NAME) instead of blindly
+              // taking the first file alphabetically, which can pick an
+              // unrelated database and fail the import.
+              const detectedDbName = analysisReport?.wordpress?.dbName;
+              const matchedFile = detectedDbName
+                ? files.find(f => f.toLowerCase().startsWith(String(detectedDbName).toLowerCase()))
+                : undefined;
+              sqlFile = path.join(sqlDir, matchedFile || files[0]);
+            }
           }
 
           // Fallback: search recursively for any .sql / .sql.gz files in destDir

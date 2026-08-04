@@ -65,7 +65,16 @@ async function sanitizeSQLDump(srcPath: string, destPath: string): Promise<void>
     }
   }
 
-  writeStream.end();
+  // Wait for the OS to actually finish flushing destPath to disk before
+  // returning. writeStream.end() only schedules the final flush — without
+  // awaiting 'finish', the caller can start reading/importing destPath while
+  // buffered data is still in flight, silently truncating the file at
+  // whatever point the flush hadn't reached yet (varies run to run).
+  await new Promise<void>((resolve, reject) => {
+    writeStream.end();
+    writeStream.once('finish', resolve);
+    writeStream.once('error', reject);
+  });
 }
 
 export const databaseService = {

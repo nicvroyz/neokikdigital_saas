@@ -28,6 +28,10 @@ mail.jacvroyz.cl {
 		transport http {
 			tls_insecure_skip_verify
 		}
+		header_up X-Forwarded-Proto https
+		header_up X-Webobjects-Server-Port 443
+		header_up X-Webobjects-Server-Name mail.jacvroyz.cl
+		header_up X-Webobjects-Server-URL https://mail.jacvroyz.cl
 	}
 }
 files.jacvroyz.cl {
@@ -39,6 +43,10 @@ mail.tdd.cl {
         transport http {
             tls_insecure_skip_verify
         }
+        header_up X-Forwarded-Proto https
+        header_up X-Webobjects-Server-Port 443
+        header_up X-Webobjects-Server-Name mail.tdd.cl
+        header_up X-Webobjects-Server-URL https://mail.tdd.cl
     }
 }
 
@@ -47,6 +55,10 @@ mail.aliagaingenieria.cl {
         transport http {
             tls_insecure_skip_verify
         }
+        header_up X-Forwarded-Proto https
+        header_up X-Webobjects-Server-Port 443
+        header_up X-Webobjects-Server-Name mail.aliagaingenieria.cl
+        header_up X-Webobjects-Server-URL https://mail.aliagaingenieria.cl
     }
 }
 

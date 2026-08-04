@@ -190,12 +190,17 @@ export const databaseService = {
       const importFd = fs.openSync(sanitizedPath, 'r');
       let importExitCode = 0;
       try {
-        execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, dbName], { stdio: [importFd, 'ignore', 'ignore'] });
+        // stdout/stderr must be captured (not 'ignore'): on failure this is the
+        // only way to see mysql's actual error (bad SQL, max_allowed_packet,
+        // etc.) instead of a bare "exit status 1" with no explanation.
+        execFileSync('docker', ['exec', '-i', mysqlContainer, 'mysql', '-u', 'root', `-p${rootPass}`, dbName], { stdio: [importFd, 'pipe', 'pipe'] });
         log(`[SQL IMPORT DIAGNOSTIC] Comando de importación completado exitosamente (exit status 0).`);
       } catch (err: any) {
         importExitCode = err.status !== undefined ? err.status : -1;
-        log(`[SQL IMPORT DIAGNOSTIC] Comando de importación falló con exit status ${importExitCode}. Detalle: ${err.message}`);
-        throw err;
+        const stdout = err.stdout ? err.stdout.toString().trim() : '';
+        const stderr = err.stderr ? err.stderr.toString().trim() : '';
+        log(`[SQL IMPORT DIAGNOSTIC] Comando de importación falló con exit status ${importExitCode}. Stdout: "${stdout}", Stderr: "${stderr}"`);
+        throw new Error(stderr || stdout || err.message);
       } finally {
         fs.closeSync(importFd);
       }

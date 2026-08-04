@@ -97,6 +97,9 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - /srv/neokik/sites:/srv/neokik/sites:ro
+    networks:
+      - default
+      - mailcow-network
     depends_on:
       - frontend
       - backend
@@ -133,3 +136,9 @@ volumes:
   caddy_data:
   caddy_config:
   filebrowser_data:
+
+networks:
+  default:
+  mailcow-network:
+    name: mailcowdockerized_mailcow-network
+    external: true

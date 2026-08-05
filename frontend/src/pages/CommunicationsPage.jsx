@@ -39,6 +39,42 @@ export default function CommunicationsPage({ clients, token }) {
     fetchCommunicationsData();
   }, [token]);
 
+  // Poll WhatsApp status while the tab is open so the QR code and connection
+  // state update live without requiring a manual page refresh.
+  useEffect(() => {
+    if (activeTab !== 'whatsapp') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/communications/whatsapp/status', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) setWhatsappStatus(await res.json());
+      } catch (err) {
+        console.error('Error polling WhatsApp status:', err);
+      }
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [activeTab, token]);
+
+  const [isResettingWhatsapp, setIsResettingWhatsapp] = useState(false);
+
+  const handleResetWhatsApp = async () => {
+    setIsResettingWhatsapp(true);
+    try {
+      const res = await fetch('/api/communications/whatsapp/reset', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setWhatsappStatus(await res.json());
+    } catch (err) {
+      console.error('Error resetting WhatsApp session:', err);
+    } finally {
+      setIsResettingWhatsapp(false);
+    }
+  };
+
   const handleCreateAndSendCampaign = async () => {
     setIsSending(true);
     setShowConfirmModal(false);
@@ -325,21 +361,39 @@ export default function CommunicationsPage({ clients, token }) {
             <div style={{ backgroundColor: '#f8fafc', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', marginBottom: '1.5rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                 <span style={{ fontSize: '0.875rem', fontWeight: '700', color: 'var(--text-sub)' }}>Estado de Conexión</span>
-                <span className="badge badge-active"><span className="pulse-dot"></span> CONECTADO EN VIVO</span>
+                {whatsappStatus?.status === 'CONNECTED' && (
+                  <span className="badge badge-active"><span className="pulse-dot"></span> CONECTADO EN VIVO</span>
+                )}
+                {whatsappStatus?.status === 'QR_READY' && (
+                  <span className="badge" style={{ backgroundColor: '#fef3c7', color: '#b45309' }}>ESPERANDO ESCANEO</span>
+                )}
+                {(!whatsappStatus || whatsappStatus?.status === 'DISCONNECTED') && (
+                  <span className="badge" style={{ backgroundColor: '#fee2e2', color: '#be123c' }}>DESCONECTADO</span>
+                )}
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.875rem', fontWeight: '700', color: 'var(--text-sub)' }}>Número Vinculado</span>
-                <span style={{ fontWeight: '800', color: 'var(--brand-indigo)', fontSize: '0.95rem' }}>{whatsappStatus?.phoneNumber || '+56 9 8765 4321'}</span>
+                <span style={{ fontWeight: '800', color: 'var(--brand-indigo)', fontSize: '0.95rem' }}>{whatsappStatus?.phoneNumber || 'No vinculado'}</span>
               </div>
             </div>
 
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-sub)', lineHeight: 1.6 }}>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-sub)', lineHeight: 1.6, marginBottom: '1.25rem' }}>
               <strong style={{ color: 'var(--text-main)' }}>Ruta de Persistencia VPS:</strong><br />
               <code>/opt/neokikdigital_saas/backend/whatsapp_session/</code>
               <p style={{ marginTop: '0.5rem' }}>
-                La sesión se mantiene autenticada permanentemente en el servidor incluso si reinicias el sistema o la aplicación PM2.
+                La sesión se mantiene autenticada permanentemente en el servidor incluso si reinicias el sistema o el contenedor Docker.
               </p>
             </div>
+
+            <button
+              className="btn btn-secondary"
+              onClick={handleResetWhatsApp}
+              disabled={isResettingWhatsapp}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <RefreshCw size={16} className={isResettingWhatsapp ? 'spin' : ''} />
+              {isResettingWhatsapp ? 'Reiniciando sesión...' : 'Generar nuevo QR / Reconectar'}
+            </button>
           </div>
 
           <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
@@ -350,13 +404,25 @@ export default function CommunicationsPage({ clients, token }) {
               Escanea con la app de WhatsApp de la agencia en tu teléfono para vincular o renovar la sesión.
             </p>
 
-            <div style={{ display: 'inline-block', padding: '1rem', backgroundColor: '#ffffff', borderRadius: 'var(--radius-lg)', border: '2px dashed var(--border-hover)', boxShadow: 'var(--shadow-sm)' }}>
-              <img
-                src={whatsappStatus?.qrCodeUrl || 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=NeokikDigitalWhatsAppSession'}
-                alt="WhatsApp QR Code"
-                style={{ width: '200px', height: '200px', borderRadius: '8px' }}
-              />
-            </div>
+            {whatsappStatus?.status === 'CONNECTED' ? (
+              <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+                <CheckCircle2 size={64} color="#15803d" />
+                <span style={{ fontWeight: '800', color: '#15803d' }}>Sesión vinculada</span>
+              </div>
+            ) : whatsappStatus?.qrCodeUrl ? (
+              <div style={{ display: 'inline-block', padding: '1rem', backgroundColor: '#ffffff', borderRadius: 'var(--radius-lg)', border: '2px dashed var(--border-hover)', boxShadow: 'var(--shadow-sm)' }}>
+                <img
+                  src={whatsappStatus.qrCodeUrl}
+                  alt="WhatsApp QR Code"
+                  style={{ width: '200px', height: '200px', borderRadius: '8px' }}
+                />
+              </div>
+            ) : (
+              <div style={{ padding: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', color: 'var(--text-sub)' }}>
+                <QrCode size={64} />
+                <span style={{ fontWeight: '700' }}>Generando código QR...</span>
+              </div>
+            )}
 
             <div style={{ marginTop: '1.25rem', fontSize: '0.78rem', color: '#059669', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem' }}>
               <ShieldCheck size={15} /> Sesión Baileys Activa - Sin costo de API de terceros

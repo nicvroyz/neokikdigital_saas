@@ -98,7 +98,14 @@ export const campaignService = {
             [sent ? 'SENT' : 'FAILED', rec.id]
           );
         } else if (rec.channel === 'WHATSAPP') {
-          const waRes = await whatsappService.sendMessage(rec.phone || '+56912345678', campaign.message);
+          if (!rec.phone) {
+            await query(
+              `UPDATE campaign_recipients SET status = 'FAILED', error_message = $1 WHERE id = $2`,
+              ['El cliente no tiene un número de teléfono registrado.', rec.id]
+            );
+            continue;
+          }
+          const waRes = await whatsappService.sendMessage(rec.phone, campaign.message);
           await query(
             `UPDATE campaign_recipients SET status = $1, sent_at = CURRENT_TIMESTAMP WHERE id = $2`,
             [waRes.success ? 'SENT' : 'FAILED', rec.id]

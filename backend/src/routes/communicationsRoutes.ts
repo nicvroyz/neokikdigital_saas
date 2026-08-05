@@ -11,5 +11,6 @@ router.get('/campaigns/:id', communicationsController.getCampaignById);
 router.post('/campaigns', communicationsController.createCampaign);
 router.post('/campaigns/:id/send', communicationsController.sendCampaign);
 router.get('/whatsapp/status', communicationsController.getWhatsAppStatus);
+router.post('/whatsapp/reset', communicationsController.resetWhatsAppSession);
 
 export default router;

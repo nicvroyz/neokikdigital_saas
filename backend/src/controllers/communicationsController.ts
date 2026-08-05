@@ -56,5 +56,15 @@ export const communicationsController = {
       console.error('Error fetching WhatsApp status:', err);
       return res.status(500).json({ error: 'Failed to fetch WhatsApp status' });
     }
+  },
+
+  async resetWhatsAppSession(req: Request, res: Response) {
+    try {
+      const status = await whatsappService.resetSession();
+      return res.json(status);
+    } catch (err) {
+      console.error('Error resetting WhatsApp session:', err);
+      return res.status(500).json({ error: 'Failed to reset WhatsApp session' });
+    }
   }
 };

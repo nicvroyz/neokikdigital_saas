@@ -95,20 +95,7 @@ export const monitoringService = {
   async getLatestHealthMetrics(): Promise<any> {
     const result = await query('SELECT * FROM server_health_metrics ORDER BY created_at DESC LIMIT 1');
     if (result.rows.length === 0) {
-      // Return simulated fallback
-      return {
-        cpu_usage: 23.5,
-        ram_total_gb: 8.0,
-        ram_used_gb: 3.2,
-        disk_total_gb: 160.0,
-        disk_used_gb: 67.3,
-        docker_status: 'active',
-        mailcow_status: 'active',
-        redis_status: 'active',
-        postgres_status: 'active',
-        response_time_ms: 45,
-        created_at: new Date().toISOString()
-      };
+      return null;
     }
     return result.rows[0];
   }

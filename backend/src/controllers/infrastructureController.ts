@@ -471,6 +471,10 @@ export const infrastructureController = {
         metrics = await monitoringService.getLatestHealthMetrics();
       }
 
+      if (!metrics) {
+        return res.status(503).json({ error: 'Métricas del servidor aún no disponibles. Intenta de nuevo en unos segundos.' });
+      }
+
       // Read real OS version from /host/os-release if mounted
       let osName = 'Ubuntu 24.04 LTS'; // Default VPS OS fallback
       try {

@@ -476,6 +476,10 @@ export const backupAnalyzerService = {
       }
     }
 
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(`Archivo de respaldo no encontrado: ${filePath}`);
+    }
+
     log('[DRY RUN] Retornando análisis simulado de backup cPanel WordPress');
     await new Promise(resolve => setTimeout(resolve, 200));
     return getSimulatedReport(filePath);

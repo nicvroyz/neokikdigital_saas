@@ -82,6 +82,11 @@ export default function App() {
         return;
       }
 
+      const saved = await res.json();
+      if (saved._syncWarnings && saved._syncWarnings.length > 0) {
+        alert(`Cliente guardado, pero con advertencias:\n\n${saved._syncWarnings.join('\n')}`);
+      }
+
       setIsClientModalOpen(false);
       setSelectedClientForEdit(null);
       await fetchDashboardData();
@@ -105,6 +110,11 @@ export default function App() {
         const err = await res.json();
         alert(`Renewal failed: ${err.error}`);
         return;
+      }
+
+      const renewed = await res.json();
+      if (renewed._syncWarnings && renewed._syncWarnings.length > 0) {
+        alert(`Renovación guardada, pero con advertencias:\n\n${renewed._syncWarnings.join('\n')}`);
       }
 
       setIsRenewModalOpen(false);

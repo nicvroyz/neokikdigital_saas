@@ -1,5 +1,6 @@
 import { query } from '../config/db';
 import { hostingService } from './hostingService';
+import { mailcowService } from './mailcowService';
 import { config } from '../config/env';
 
 export interface ClientData {
@@ -20,6 +21,39 @@ export interface ClientData {
   grace_period_days?: number;
   doc_root?: string;
   notes?: string;
+}
+
+// Best-effort: not every client has a real Docker/Caddy site or a Mailcow
+// domain behind them (e.g. clients registered manually, never migrated), so
+// these syncs legitimately fail for them and must not block saving the
+// client's own fields. Failures are collected and surfaced to the caller
+// instead of being silently swallowed, so a suspend that didn't actually
+// take effect is visible in the panel rather than just showing "SUSPENDED"
+// with no real effect.
+async function syncClientInfrastructure(client: any): Promise<string[]> {
+  const warnings: string[] = [];
+  const suspended = client.status === 'SUSPENDED';
+
+  try {
+    await hostingService.applyCaddyConfig(client.domain, client.doc_root, suspended);
+  } catch (err) {
+    const msg = `No se pudo sincronizar el sitio web (Caddy) para ${client.domain}: ${(err as Error).message}`;
+    console.error(`[CLIENT SERVICE] ${msg}`);
+    warnings.push(msg);
+  }
+
+  try {
+    const exists = await mailcowService.domainExists(client.domain);
+    if (exists) {
+      await mailcowService.setDomainActive(client.domain, !suspended);
+    }
+  } catch (err) {
+    const msg = `No se pudo sincronizar el correo (Mailcow) para ${client.domain}: ${(err as Error).message}`;
+    console.error(`[CLIENT SERVICE] ${msg}`);
+    warnings.push(msg);
+  }
+
+  return warnings;
 }
 
 export const clientService = {
@@ -78,10 +112,9 @@ export const clientService = {
     );
 
     const createdClient = res.rows[0];
-    // Sync Caddy config
-    await hostingService.applyCaddyConfig(createdClient.domain, createdClient.doc_root, createdClient.status === 'SUSPENDED');
+    const syncWarnings = await syncClientInfrastructure(createdClient);
 
-    return createdClient;
+    return { ...createdClient, _syncWarnings: syncWarnings };
   },
 
   async updateClient(id: string, data: Partial<ClientData>) {
@@ -108,20 +141,12 @@ export const clientService = {
     const sql = `UPDATE clients SET ${fields.join(', ')} WHERE id = $1 RETURNING *`;
     const res = await query(sql, params);
     
-    if (res.rows.length > 0) {
-      const client = res.rows[0];
-      // Best-effort: clients registered manually (never provisioned by the
-      // migration engine) don't have a real Docker/Caddy site behind them, so
-      // this sync legitimately fails for them. That must not block saving the
-      // client's own fields (name, email, plan, etc.).
-      try {
-        await hostingService.applyCaddyConfig(client.domain, client.doc_root, client.status === 'SUSPENDED');
-      } catch (err) {
-        console.error(`[CLIENT SERVICE] Warning: Caddy sync failed for ${client.domain} during update, client fields were still saved:`, err);
-      }
-    }
+    if (res.rows.length === 0) return res.rows[0];
 
-    return res.rows[0];
+    const client = res.rows[0];
+    const syncWarnings = await syncClientInfrastructure(client);
+
+    return { ...client, _syncWarnings: syncWarnings };
   },
 
   async renewSubscription(id: string, amount: number, paymentMethod: string = 'MANUAL_TRANSFER', notes?: string) {
@@ -170,10 +195,11 @@ export const clientService = {
     );
 
     const updatedClient = updatedRes.rows[0];
-    // Re-apply Caddy config to reactivate live website
-    await hostingService.applyCaddyConfig(updatedClient.domain, updatedClient.doc_root, false);
+    // Re-apply Caddy config and re-enable the mail domain to reactivate the
+    // client's live website and email now that status is back to ACTIVE.
+    const syncWarnings = await syncClientInfrastructure(updatedClient);
 
-    return updatedClient;
+    return { ...updatedClient, _syncWarnings: syncWarnings };
   },
 
   async deleteClient(id: string) {

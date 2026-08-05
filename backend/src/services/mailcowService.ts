@@ -416,6 +416,20 @@ export const mailcowService = {
     });
   },
 
+  async setDomainActive(domain: string, active: boolean): Promise<any> {
+    log(`${active ? 'Activando' : 'Desactivando'} dominio de correo: ${domain}`);
+
+    if (isDryRun()) {
+      log(`[DRY RUN] Dominio ${active ? 'activado' : 'desactivado'}: ${domain}`);
+      return { type: 'success', msg: `Dominio ${domain} ${active ? 'activado' : 'desactivado'} (simulado)` };
+    }
+
+    return apiRequest('POST', '/edit/domain', {
+      items: [domain],
+      attr: { active: active ? 1 : 0 },
+    });
+  },
+
   async getStatus(): Promise<{ connected: boolean; version?: string; domains: number; mailboxes: number }> {
     log('Consultando estado de Mailcow...');
 

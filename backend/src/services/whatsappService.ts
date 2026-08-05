@@ -7,6 +7,7 @@ import makeWASocket, {
   DisconnectReason,
   WASocket
 } from '@whiskeysockets/baileys';
+import { config } from '../config/env';
 
 export interface WhatsAppStatus {
   connected: boolean;
@@ -17,7 +18,9 @@ export interface WhatsAppStatus {
 
 // Session store directory - Baileys persists auth credentials here so the
 // linked session survives backend restarts without re-scanning the QR.
-const SESSION_DIR = path.join(__dirname, '../../whatsapp_session');
+// Lives under storagePath (bind-mounted from /srv/neokik on the host) rather
+// than inside the container's own filesystem, which gets wiped on rebuild.
+const SESSION_DIR = path.join(config.infrastructure.storagePath, 'whatsapp_session');
 if (!fs.existsSync(SESSION_DIR)) {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
 }

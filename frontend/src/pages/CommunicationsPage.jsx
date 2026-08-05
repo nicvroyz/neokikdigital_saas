@@ -379,7 +379,7 @@ export default function CommunicationsPage({ clients, token }) {
 
             <div style={{ fontSize: '0.85rem', color: 'var(--text-sub)', lineHeight: 1.6, marginBottom: '1.25rem' }}>
               <strong style={{ color: 'var(--text-main)' }}>Ruta de Persistencia VPS:</strong><br />
-              <code>/opt/neokikdigital_saas/backend/whatsapp_session/</code>
+              <code>/srv/neokik/storage/whatsapp_session/</code>
               <p style={{ marginTop: '0.5rem' }}>
                 La sesión se mantiene autenticada permanentemente en el servidor incluso si reinicias el sistema o el contenedor Docker.
               </p>
